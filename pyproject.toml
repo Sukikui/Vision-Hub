@@ -1,0 +1,13 @@
+[project]
+name = "vision-hub"
+version = "0.1.0"
+description = "Edge hub communicating with ESP32-P4 surveillance nodes over MQTT via Ethernet"
+readme = "README.md"
+repository = "https://github.com/Sukikui/Vision-Hub"
+license = "MIT"
+requires-python = ">=3.13"
+dependencies = [
+    "opencv-python-headless>=4.13.0.92",
+    "paho-mqtt>=2.1.0",
+    "pyyaml>=6.0.3",
+]
