@@ -65,3 +65,7 @@ Desktop.ini
 *.suo
 *.sln.docstates
 context-docs/
+
+# Model artifacts
+models/**/*.bin
+models/**/*.param
