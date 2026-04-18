@@ -1,0 +1,1 @@
+"""Vision-Hub edge application."""
