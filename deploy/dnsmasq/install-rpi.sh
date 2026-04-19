@@ -7,6 +7,56 @@ DEFAULT_ENV_FILE="${DEPLOY_DIR}/vision-hub-field.env"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 CONF_TEMPLATE="${SCRIPT_DIR}/vision-hub.conf.template"
 CONF_TARGET="/etc/dnsmasq.d/vision-hub.conf"
+RENDER_ONLY=false
+
+usage() {
+    echo "usage: $0 [--render-only]" >&2
+}
+
+case "${1:-}" in
+    "")
+        ;;
+    "--render-only")
+        RENDER_ONLY=true
+        ;;
+    "-h" | "--help")
+        usage
+        exit 0
+        ;;
+    *)
+        usage
+        exit 2
+        ;;
+esac
+
+render_config() {
+    output_path="$1"
+
+    if [ "${output_path}" = "-" ]; then
+        sed \
+            -e "s|<field_interface>|${FIELD_INTERFACE}|g" \
+            -e "s|<field_address>|${FIELD_ADDRESS}|g" \
+            -e "s|<field_gateway>|${FIELD_GATEWAY}|g" \
+            -e "s|<dhcp_start>|${FIELD_DHCP_RANGE_START}|g" \
+            -e "s|<dhcp_end>|${FIELD_DHCP_RANGE_END}|g" \
+            -e "s|<dhcp_netmask>|${FIELD_DHCP_NETMASK}|g" \
+            -e "s|<dhcp_lease>|${FIELD_DHCP_LEASE_TIME}|g" \
+            -e "s|<mqtt_port>|${MQTT_PORT}|g" \
+            "${CONF_TEMPLATE}"
+        return
+    fi
+
+    sed \
+        -e "s|<field_interface>|${FIELD_INTERFACE}|g" \
+        -e "s|<field_address>|${FIELD_ADDRESS}|g" \
+        -e "s|<field_gateway>|${FIELD_GATEWAY}|g" \
+        -e "s|<dhcp_start>|${FIELD_DHCP_RANGE_START}|g" \
+        -e "s|<dhcp_end>|${FIELD_DHCP_RANGE_END}|g" \
+        -e "s|<dhcp_netmask>|${FIELD_DHCP_NETMASK}|g" \
+        -e "s|<dhcp_lease>|${FIELD_DHCP_LEASE_TIME}|g" \
+        -e "s|<mqtt_port>|${MQTT_PORT}|g" \
+        "${CONF_TEMPLATE}" > "${output_path}"
+}
 
 # Step 1: load the shared field-network values.
 #
@@ -44,19 +94,28 @@ if [ "${FIELD_ADDRESS_IP}" != "${FIELD_GATEWAY}" ]; then
     exit 1
 fi
 
-# Step 4: this script installs files under /etc and restarts a system service.
+# Step 4: optionally render the final config to stdout and stop.
+#
+# This mode is used by tests and by humans who want to inspect the generated
+# config without installing anything into /etc or restarting dnsmasq.
+if [ "${RENDER_ONLY}" = true ]; then
+    render_config -
+    exit 0
+fi
+
+# Step 5: this script installs files under /etc and restarts a system service.
 if [ "$(id -u)" -ne 0 ]; then
     echo "error: run this script with sudo" >&2
     exit 1
 fi
 
-# Step 5: install dnsmasq if the host does not already provide it.
+# Step 6: install dnsmasq if the host does not already provide it.
 if ! command -v dnsmasq >/dev/null 2>&1; then
     apt-get update
     apt-get install -y dnsmasq
 fi
 
-# Step 6: render the template into a temporary concrete config file.
+# Step 7: render the template into a temporary concrete config file.
 #
 # This is the moment where:
 #   deploy/dnsmasq/vision-hub.conf.template
@@ -68,24 +127,15 @@ fi
 TMP_CONF="$(mktemp)"
 trap 'rm -f "${TMP_CONF}"' EXIT
 
-sed \
-    -e "s|<field_interface>|${FIELD_INTERFACE}|g" \
-    -e "s|<field_address>|${FIELD_ADDRESS}|g" \
-    -e "s|<field_gateway>|${FIELD_GATEWAY}|g" \
-    -e "s|<dhcp_start>|${FIELD_DHCP_RANGE_START}|g" \
-    -e "s|<dhcp_end>|${FIELD_DHCP_RANGE_END}|g" \
-    -e "s|<dhcp_netmask>|${FIELD_DHCP_NETMASK}|g" \
-    -e "s|<dhcp_lease>|${FIELD_DHCP_LEASE_TIME}|g" \
-    -e "s|<mqtt_port>|${MQTT_PORT}|g" \
-    "${CONF_TEMPLATE}" > "${TMP_CONF}"
+render_config "${TMP_CONF}"
 
-# Step 7: install the rendered config into dnsmasq's system config directory.
+# Step 8: install the rendered config into dnsmasq's system config directory.
 install -D -m 0644 "${TMP_CONF}" "${CONF_TARGET}"
 
-# Step 8: validate the installed config before restarting the running service.
+# Step 9: validate the installed config before restarting the running service.
 dnsmasq --test --conf-file="${CONF_TARGET}"
 
-# Step 9: enable and restart dnsmasq so ESP32 nodes can receive leases.
+# Step 10: enable and restart dnsmasq so ESP32 nodes can receive leases.
 systemctl enable dnsmasq
 systemctl restart dnsmasq
 

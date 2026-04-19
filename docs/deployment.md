@@ -107,6 +107,12 @@ Install and activate:
 sudo deploy/dnsmasq/install-rpi.sh
 ```
 
+Render without installing:
+
+```bash
+deploy/dnsmasq/install-rpi.sh --render-only
+```
+
 Generation flow:
 
 ```text
@@ -134,6 +140,12 @@ Install and activate:
 
 ```bash
 sudo deploy/mosquitto/install-rpi.sh
+```
+
+Render without installing:
+
+```bash
+deploy/mosquitto/install-rpi.sh --render-only
 ```
 
 Generation flow:
@@ -183,6 +195,16 @@ uv run python main.py
 ```
 
 ## Verification
+
+Validate scripts and generated configs without changing the host:
+
+```bash
+bash -n deploy/rpi/configure-field-interface.sh
+bash -n deploy/dnsmasq/install-rpi.sh
+bash -n deploy/mosquitto/install-rpi.sh
+deploy/dnsmasq/install-rpi.sh --render-only
+deploy/mosquitto/install-rpi.sh --render-only
+```
 
 Check the field interface:
 
