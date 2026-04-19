@@ -61,7 +61,7 @@ jobs:
             tests.test_ncnn_yolo
 
   deployment-tests:
-    name: 🛠️ Deployment scripts
+    name: 🛠️ Deployment Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
 
     strategy:
