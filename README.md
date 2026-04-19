@@ -7,7 +7,7 @@
 
 </div>
 
-Under cons🚧 Under construction 🚧
+🚧 Under construction 🚧
 
 Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vision-Node>.
 
