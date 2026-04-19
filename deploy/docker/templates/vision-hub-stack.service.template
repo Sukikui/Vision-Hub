@@ -1,0 +1,19 @@
+[Unit]
+Description=Vision-Hub Docker stack
+Requires=docker.service
+After=NetworkManager.service docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=<project_dir>/compose.yaml
+ConditionPathExists=<project_dir>/deploy/docker/render-configs.sh
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=<project_dir>
+ExecStartPre=<project_dir>/deploy/docker/render-configs.sh
+ExecStart=<docker_bin> compose up -d --remove-orphans
+ExecStop=<docker_bin> compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

@@ -7,6 +7,8 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 ## Documentation
 
 - [Deployment](docs/deployment.md)
+- [Network](docs/network.md)
+- [Docker](docs/docker.md)
 - [Inference](docs/inference.md)
 
 ## System Overview
@@ -18,6 +20,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Target OS | Raspberry Pi OS Lite 64-bit |
 | Runtime | Python `>=3.13` |
 | Package manager | `uv` |
+| Container runtime | Docker Engine with Docker Compose plugin |
 | Local MQTT broker | Mosquitto |
 | Field DHCP server | dnsmasq |
 | MQTT client | `paho-mqtt` |
@@ -31,8 +34,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | --- | --- |
 | Python environment | project `.venv` created with `uv sync` |
 | Field interface | Raspberry Pi Ethernet configured from `deploy/rpi/` |
-| Field DHCP | dnsmasq configured from `deploy/dnsmasq/` |
-| Local MQTT | Mosquitto configured from `deploy/mosquitto/` |
+| Docker stack | `compose.yaml` rendered and managed through `deploy/docker/` |
 | AI model | YOLO11n exported to NCNN with `tools/export_yolo_ncnn.py` |
 | Model files | `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` present in the model directory |
 | Field network | ESP32 nodes can reach the Raspberry Pi MQTT broker, typically on port `1883` |
@@ -61,18 +63,22 @@ uv sync
 
 `uv sync` creates the project `.venv` if it does not already exist, then installs dependencies from `pyproject.toml` and `uv.lock`.
 
-### 3. Configure Field Network Services
+### 3. Configure the Field Interface
 
 Raspberry Pi field interface configuration is stored in [`deploy/rpi/`](deploy/rpi/).
-DHCP configuration for the ESP32 field network is stored in [`deploy/dnsmasq/`](deploy/dnsmasq/).
-Mosquitto configuration for the local MQTT broker is stored in [`deploy/mosquitto/`](deploy/mosquitto/).
+
+```bash
+sudo deploy/rpi/configure-field-interface.sh
+```
 
 ### 4. Export the Person Detection Model
+
+Run from the repository root:
 
 ```bash
 uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py \
   --model yolo11n.pt \
-  --output-dir /opt/vision-hub/models/yolo11n-ncnn
+  --output-dir models/yolo11n-ncnn
 ```
 
 The export tool uses Ultralytics and PNNX only during provisioning. The Vision-Hub service does not depend on them at runtime.
@@ -80,19 +86,24 @@ The export tool uses Ultralytics and PNNX only during provisioning. The Vision-H
 Ultralytics creates its NCNN export in a temporary generated folder such as `yolo11n_ncnn_model/`. The Vision-Hub tool then installs the runtime `.param`/`.bin` files and the export metadata into the stable directory used by the service:
 
 ```text
-/opt/vision-hub/models/yolo11n-ncnn/
+models/yolo11n-ncnn/
   model.ncnn.param
   model.ncnn.bin
   metadata.yaml
 ```
 
+Docker mounts this repository directory read-only into the `vision-hub` container at `/opt/vision-hub/models/yolo11n-ncnn`.
+
 Model artifacts are not versioned in Git.
 
-### 5. Run the Service
+### 5. Install the Docker Stack
 
 ```bash
-uv run python main.py
+deploy/docker/render-configs.sh
+sudo deploy/docker/install-rpi.sh
 ```
+
+The installed systemd service runs `docker compose up -d` at boot. The stack contains `dnsmasq`, `mosquitto`, and `vision-hub`, each with `restart: unless-stopped`.
 
 ## Development
 

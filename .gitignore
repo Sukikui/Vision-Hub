@@ -65,6 +65,7 @@ Desktop.ini
 *.suo
 *.sln.docstates
 context-docs/
+deploy/docker/generated/
 
 # Model artifacts
 *.pt

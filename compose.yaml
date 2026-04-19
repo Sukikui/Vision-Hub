@@ -1,0 +1,50 @@
+name: vision-hub
+
+services:
+  dnsmasq:
+    build:
+      context: .
+      dockerfile: deploy/docker/dnsmasq.Dockerfile
+    image: vision-hub-dnsmasq:local
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./deploy/docker/generated/dnsmasq/vision-hub.conf:/etc/dnsmasq.d/vision-hub.conf:ro
+    entrypoint: ["dnsmasq"]
+    command: ["--no-daemon", "--conf-file=/etc/dnsmasq.d/vision-hub.conf"]
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    network_mode: host
+    volumes:
+      - ./deploy/docker/generated/mosquitto/vision-hub.conf:/mosquitto/config/vision-hub.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    command: ["mosquitto", "-c", "/mosquitto/config/vision-hub.conf"]
+    restart: unless-stopped
+
+  vision-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vision-hub:local
+    network_mode: host
+    depends_on:
+      - mosquitto
+    environment:
+      VISION_HUB_MQTT_HOST: "127.0.0.1"
+      VISION_HUB_MQTT_PORT: "1883"
+      VISION_HUB_MODEL_PATH: "/opt/vision-hub/models/yolo11n-ncnn"
+      VISION_HUB_DATA_DIR: "/var/lib/vision-hub"
+    volumes:
+      - ./models/yolo11n-ncnn:/opt/vision-hub/models/yolo11n-ncnn:ro
+      - vision-hub-data:/var/lib/vision-hub
+    restart: unless-stopped
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
+  vision-hub-data:

@@ -7,7 +7,7 @@ listener <mqtt_port> <mqtt_listener_address>
 allow_anonymous true
 
 persistence true
-persistence_location /var/lib/mosquitto/
+persistence_location <mqtt_persistence_location>
 
-log_dest syslog
+log_dest <mqtt_log_dest>
 connection_messages true

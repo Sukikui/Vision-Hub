@@ -3,25 +3,33 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
-DNSMASQ_SCRIPT = ROOT / "deploy" / "dnsmasq" / "install-rpi.sh"
-MOSQUITTO_SCRIPT = ROOT / "deploy" / "mosquitto" / "install-rpi.sh"
 RPI_INTERFACE_SCRIPT = ROOT / "deploy" / "rpi" / "configure-field-interface.sh"
+DOCKER_RENDER_SCRIPT = ROOT / "deploy" / "docker" / "render-configs.sh"
+DOCKER_INSTALL_SCRIPT = ROOT / "deploy" / "docker" / "install-rpi.sh"
+COMPOSE_FILE = ROOT / "compose.yaml"
 
 
 class DeployConfigTest(unittest.TestCase):
-    """Unit tests for host deployment scripts and rendered configs."""
+    """Unit tests for Docker deployment scripts and rendered configs."""
 
     def test_deploy_scripts_are_valid_bash(self) -> None:
         """Validate deployment scripts with bash syntax checking."""
 
-        for script in (DNSMASQ_SCRIPT, MOSQUITTO_SCRIPT, RPI_INTERFACE_SCRIPT):
+        for script in (
+            RPI_INTERFACE_SCRIPT,
+            DOCKER_RENDER_SCRIPT,
+            DOCKER_INSTALL_SCRIPT,
+        ):
             with self.subTest(script=script):
                 result = subprocess.run(
                     ["bash", "-n", str(script)],
@@ -33,36 +41,12 @@ class DeployConfigTest(unittest.TestCase):
 
                 self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_dnsmasq_render_only_uses_default_field_contract(self) -> None:
-        """Render dnsmasq config from the default shared env without installing it."""
-
-        result = _run_script(DNSMASQ_SCRIPT, "--render-only")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("interface=eth0", result.stdout)
-        self.assertIn("port=0", result.stdout)
-        self.assertIn("dhcp-range=192.168.50.20,192.168.50.200,255.255.255.0,24h", result.stdout)
-        self.assertIn("dhcp-option=option:router,192.168.50.1", result.stdout)
-        self.assertNotIn("<field_", result.stdout)
-        self.assertNotIn("<dhcp_", result.stdout)
-        self.assertNotIn("<mqtt_", result.stdout)
-
-    def test_mosquitto_render_only_uses_default_field_contract(self) -> None:
-        """Render Mosquitto config from the default shared env without installing it."""
-
-        result = _run_script(MOSQUITTO_SCRIPT, "--render-only")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("listener 1883 0.0.0.0", result.stdout)
-        self.assertIn("allow_anonymous true", result.stdout)
-        self.assertIn("persistence true", result.stdout)
-        self.assertNotIn("<mqtt_", result.stdout)
-
     def test_custom_env_changes_rendered_configs(self) -> None:
-        """Render both service configs from a custom shared env file."""
+        """Render Docker service configs from a custom shared env file."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
             env_path = Path(temp_dir) / "custom.env"
+            generated_dir = Path(temp_dir) / "generated"
             env_path.write_text(
                 "\n".join(
                     (
@@ -80,18 +64,22 @@ class DeployConfigTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            dnsmasq = _run_script(DNSMASQ_SCRIPT, "--render-only", env_file=env_path)
-            mosquitto = _run_script(MOSQUITTO_SCRIPT, "--render-only", env_file=env_path)
+            result = _run_script(
+                DOCKER_RENDER_SCRIPT,
+                env_file=env_path,
+                env={"GENERATED_DIR": str(generated_dir)},
+            )
+            dnsmasq_config = (generated_dir / "dnsmasq" / "vision-hub.conf").read_text(encoding="utf-8")
+            mosquitto_config = (generated_dir / "mosquitto" / "vision-hub.conf").read_text(encoding="utf-8")
 
-        self.assertEqual(dnsmasq.returncode, 0, dnsmasq.stderr)
-        self.assertEqual(mosquitto.returncode, 0, mosquitto.stderr)
-        self.assertIn("interface=enp1s0", dnsmasq.stdout)
-        self.assertIn("dhcp-range=192.168.60.20,192.168.60.99,255.255.255.0,12h", dnsmasq.stdout)
-        self.assertIn("dhcp-option=option:router,192.168.60.1", dnsmasq.stdout)
-        self.assertIn("mqtt://192.168.60.1:1884", dnsmasq.stdout)
-        self.assertIn("listener 1884 192.168.60.1", mosquitto.stdout)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("interface=enp1s0", dnsmasq_config)
+        self.assertIn("dhcp-range=192.168.60.20,192.168.60.99,255.255.255.0,12h", dnsmasq_config)
+        self.assertIn("dhcp-option=option:router,192.168.60.1", dnsmasq_config)
+        self.assertIn("mqtt://192.168.60.1:1884", dnsmasq_config)
+        self.assertIn("listener 1884 192.168.60.1", mosquitto_config)
 
-    def test_dnsmasq_rejects_gateway_that_does_not_match_field_address(self) -> None:
+    def test_docker_render_rejects_gateway_that_does_not_match_field_address(self) -> None:
         """Reject env files that break the ESP32 gateway-as-broker contract."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -113,27 +101,113 @@ class DeployConfigTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result = _run_script(DNSMASQ_SCRIPT, "--render-only", env_file=env_path)
+            result = _run_script(DOCKER_RENDER_SCRIPT, env_file=env_path)
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("FIELD_GATEWAY must match", result.stderr)
 
+    def test_docker_render_configs_uses_default_field_contract(self) -> None:
+        """Render Docker-mounted service configs from the default env file."""
 
-def _run_script(script: Path, *args: str, env_file: Path | None = None) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            generated_dir = Path(temp_dir) / "generated"
+            result = _run_script(DOCKER_RENDER_SCRIPT, env={"GENERATED_DIR": str(generated_dir)})
+
+            dnsmasq_config = (generated_dir / "dnsmasq" / "vision-hub.conf").read_text(encoding="utf-8")
+            mosquitto_config = (generated_dir / "mosquitto" / "vision-hub.conf").read_text(encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("interface=eth0", dnsmasq_config)
+        self.assertIn("dhcp-option=option:router,192.168.50.1", dnsmasq_config)
+        self.assertIn("mqtt://192.168.50.1:1883", dnsmasq_config)
+        self.assertIn("listener 1883 0.0.0.0", mosquitto_config)
+        self.assertIn("persistence_location /mosquitto/data/", mosquitto_config)
+        self.assertIn("log_dest stdout", mosquitto_config)
+        self.assertNotIn("<", dnsmasq_config)
+        self.assertNotIn("<", mosquitto_config)
+
+    def test_docker_systemd_render_points_to_compose_stack(self) -> None:
+        """Render the systemd unit for the repository Docker Compose stack."""
+
+        result = _run_script(DOCKER_INSTALL_SCRIPT, "--render-service-only", env={"DOCKER_BIN": "/usr/bin/docker"})
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"WorkingDirectory={ROOT}", result.stdout)
+        self.assertIn(f"ExecStartPre={ROOT}/deploy/docker/render-configs.sh", result.stdout)
+        self.assertIn("ExecStart=/usr/bin/docker compose up -d --remove-orphans", result.stdout)
+        self.assertIn("ExecStop=/usr/bin/docker compose down", result.stdout)
+        self.assertNotIn("<project_dir>", result.stdout)
+        self.assertNotIn("<docker_bin>", result.stdout)
+
+    def test_compose_file_defines_restartable_host_network_services(self) -> None:
+        """Validate the Docker Compose service contract without starting it."""
+
+        compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+        services = compose["services"]
+
+        for service_name in ("dnsmasq", "mosquitto", "vision-hub"):
+            with self.subTest(service=service_name):
+                service = services[service_name]
+                self.assertEqual(service["network_mode"], "host")
+                self.assertEqual(service["restart"], "unless-stopped")
+
+        self.assertEqual(services["dnsmasq"]["cap_add"], ["NET_ADMIN", "NET_RAW"])
+        self.assertIn("eclipse-mosquitto:2", services["mosquitto"]["image"])
+        self.assertEqual(services["vision-hub"]["environment"]["VISION_HUB_MQTT_HOST"], "127.0.0.1")
+        self.assertIn("mosquitto-data", compose["volumes"])
+        self.assertIn("vision-hub-data", compose["volumes"])
+
+    def test_docker_compose_config_when_available(self) -> None:
+        """Validate the Compose file with Docker Compose when available."""
+
+        docker = shutil.which("docker")
+        if docker is None:
+            self.skipTest("docker is not installed")
+
+        version = subprocess.run(
+            [docker, "compose", "version"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if version.returncode != 0:
+            self.skipTest("docker compose plugin is not available")
+
+        result = subprocess.run(
+            [docker, "compose", "-f", str(COMPOSE_FILE), "config"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+def _run_script(
+    script: Path,
+    *args: str,
+    env_file: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     """Run one deployment script and capture its output.
 
     Args:
         script: Script path to run through bash.
         *args: Extra command-line arguments passed to the script.
         env_file: Optional field network env file override.
+        env: Optional environment overrides.
 
     Returns:
         Completed subprocess result.
     """
 
-    env = os.environ.copy()
+    command_env = os.environ.copy()
     if env_file is not None:
-        env["ENV_FILE"] = str(env_file)
+        command_env["ENV_FILE"] = str(env_file)
+    if env is not None:
+        command_env.update(env)
 
     return subprocess.run(
         ["bash", str(script), *args],
@@ -141,7 +215,7 @@ def _run_script(script: Path, *args: str, env_file: Path | None = None) -> subpr
         check=False,
         capture_output=True,
         text=True,
-        env=env,
+        env=command_env,
     )
 
 

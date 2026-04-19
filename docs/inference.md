@@ -35,16 +35,7 @@ The Raspberry Pi runtime does not depend on `torch` or `ultralytics`. Those tool
 
 Model files are runtime assets, not Python source files.
 
-Standard deployment path:
-
-```text
-/opt/vision-hub/models/yolo11n-ncnn/
-  model.ncnn.param
-  model.ncnn.bin
-  metadata.yaml
-```
-
-Local development path:
+Repository model path used by Docker Compose:
 
 ```text
 models/yolo11n-ncnn/
@@ -53,12 +44,30 @@ models/yolo11n-ncnn/
   metadata.yaml
 ```
 
-Docker uses the same logical contract: the host model directory is mounted read-only into the Vision-Hub container.
+Container runtime path:
+
+```text
+/opt/vision-hub/models/yolo11n-ncnn/
+  model.ncnn.param
+  model.ncnn.bin
+  metadata.yaml
+```
+
+Local development uses the same repository model path:
+
+```text
+models/yolo11n-ncnn/
+  model.ncnn.param
+  model.ncnn.bin
+  metadata.yaml
+```
+
+Docker uses this mount:
 
 Example:
 
 ```text
-/opt/vision-hub/models:/opt/vision-hub/models:ro
+./models/yolo11n-ncnn:/opt/vision-hub/models/yolo11n-ncnn:ro
 ```
 
 ## Model Files
@@ -96,14 +105,6 @@ Default command:
 uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py \
   --model yolo11n.pt \
   --output-dir models/yolo11n-ncnn
-```
-
-Production command for the Raspberry Pi model directory:
-
-```bash
-uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py \
-  --model yolo11n.pt \
-  --output-dir /opt/vision-hub/models/yolo11n-ncnn
 ```
 
 Use `--force` to replace existing `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` files.
