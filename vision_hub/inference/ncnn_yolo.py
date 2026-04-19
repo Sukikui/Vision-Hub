@@ -15,6 +15,8 @@ COCO_PERSON_LABEL = "person"
 YOLO11_STRIDES = (8, 16, 32)
 YOLO11_REG_MAX = 16
 YOLO11_COCO_CLASS_COUNT = 80
+YOLO11_RAW_OUTPUT_WIDTH = YOLO11_REG_MAX * 4 + YOLO11_COCO_CLASS_COUNT
+YOLO11_DECODED_OUTPUT_WIDTH = 4 + YOLO11_COCO_CLASS_COUNT
 
 
 @dataclass(frozen=True)
@@ -201,7 +203,7 @@ class NcnnYolo11PersonDetector:
             raise RuntimeError(f"NCNN extract failed for output {self.output_name!r}: {ret}")
 
         rows = _as_yolo11_rows(np.array(output))
-        detections = _decode_person_detections(
+        detections = _decode_yolo11_person_detections(
             rows=rows,
             padded_width=mat_in_pad.w,
             padded_height=mat_in_pad.h,
@@ -401,12 +403,10 @@ def _decode_person_detections(
         ValueError: If the row count does not match the padded input geometry.
     """
 
+    _assert_expected_yolo11_row_count(rows, padded_width=padded_width, padded_height=padded_height)
+
     proposals: list[Detection] = []
     row_offset = 0
-    expected_rows = sum((padded_width // stride) * (padded_height // stride) for stride in YOLO11_STRIDES)
-    if rows.shape[0] != expected_rows:
-        raise ValueError(f"expected {expected_rows} YOLO11 rows for padded input, got {rows.shape[0]}")
-
     for stride in YOLO11_STRIDES:
         grid_x = padded_width // stride
         grid_y = padded_height // stride
@@ -430,25 +430,152 @@ def _decode_person_detections(
             padded_x1 = center_x + distances[2]
             padded_y1 = center_y + distances[3]
 
-            x0 = _clip((padded_x0 - (wpad / 2)) / scale, 0.0, image_width - 1.0)
-            y0 = _clip((padded_y0 - (hpad / 2)) / scale, 0.0, image_height - 1.0)
-            x1 = _clip((padded_x1 - (wpad / 2)) / scale, 0.0, image_width - 1.0)
-            y1 = _clip((padded_y1 - (hpad / 2)) / scale, 0.0, image_height - 1.0)
-
-            if x1 <= x0 or y1 <= y0:
-                continue
-
-            proposals.append(
-                Detection(
-                    label=COCO_PERSON_LABEL,
-                    class_id=PERSON_CLASS_ID,
-                    score=person_score,
-                    x=x0,
-                    y=y0,
-                    width=x1 - x0,
-                    height=y1 - y0,
-                )
+            detection = _detection_from_padded_xyxy(
+                padded_x0=padded_x0,
+                padded_y0=padded_y0,
+                padded_x1=padded_x1,
+                padded_y1=padded_y1,
+                score=person_score,
+                image_width=image_width,
+                image_height=image_height,
+                scale=scale,
+                wpad=wpad,
+                hpad=hpad,
             )
+            if detection is not None:
+                proposals.append(detection)
+
+    proposals.sort(key=lambda detection: detection.score, reverse=True)
+    return _nms(proposals, nms_threshold)
+
+
+def _decode_yolo11_person_detections(
+    *,
+    rows: np.ndarray,
+    padded_width: int,
+    padded_height: int,
+    image_width: int,
+    image_height: int,
+    scale: float,
+    wpad: int,
+    hpad: int,
+    prob_threshold: float,
+    nms_threshold: float,
+) -> list[Detection]:
+    """Decode either supported YOLO11 NCNN output format.
+
+    Args:
+        rows: Row-major YOLO11 output tensor.
+        padded_width: Width of the padded model input.
+        padded_height: Height of the padded model input.
+        image_width: Original image width.
+        image_height: Original image height.
+        scale: Resize scale applied before padding.
+        wpad: Horizontal padding added after resize.
+        hpad: Vertical padding added after resize.
+        prob_threshold: Minimum person score to keep a proposal.
+        nms_threshold: IoU threshold for non-maximum suppression.
+
+    Returns:
+        Final person detections after thresholding and NMS.
+
+    Raises:
+        ValueError: If the row width does not match a supported YOLO11 output
+            format.
+    """
+
+    if rows.shape[1] == YOLO11_RAW_OUTPUT_WIDTH:
+        return _decode_person_detections(
+            rows=rows,
+            padded_width=padded_width,
+            padded_height=padded_height,
+            image_width=image_width,
+            image_height=image_height,
+            scale=scale,
+            wpad=wpad,
+            hpad=hpad,
+            prob_threshold=prob_threshold,
+            nms_threshold=nms_threshold,
+        )
+    if rows.shape[1] == YOLO11_DECODED_OUTPUT_WIDTH:
+        return _decode_exported_person_detections(
+            rows=rows,
+            padded_width=padded_width,
+            padded_height=padded_height,
+            image_width=image_width,
+            image_height=image_height,
+            scale=scale,
+            wpad=wpad,
+            hpad=hpad,
+            prob_threshold=prob_threshold,
+            nms_threshold=nms_threshold,
+        )
+
+    supported = f"{YOLO11_RAW_OUTPUT_WIDTH} or {YOLO11_DECODED_OUTPUT_WIDTH}"
+    raise ValueError(f"expected YOLO11 row width to be {supported}, got {rows.shape[1]}")
+
+
+def _decode_exported_person_detections(
+    *,
+    rows: np.ndarray,
+    padded_width: int,
+    padded_height: int,
+    image_width: int,
+    image_height: int,
+    scale: float,
+    wpad: int,
+    hpad: int,
+    prob_threshold: float,
+    nms_threshold: float,
+) -> list[Detection]:
+    """Decode Ultralytics-exported YOLO11 NCNN rows.
+
+    Ultralytics NCNN export embeds DFL box decoding and class sigmoid in the
+    graph. Its `out0` rows contain `x_center, y_center, width, height` followed
+    by the 80 COCO class scores.
+
+    Args:
+        rows: YOLO11 output rows shaped as `rows x 84`.
+        padded_width: Width of the padded model input.
+        padded_height: Height of the padded model input.
+        image_width: Original image width.
+        image_height: Original image height.
+        scale: Resize scale applied before padding.
+        wpad: Horizontal padding added after resize.
+        hpad: Vertical padding added after resize.
+        prob_threshold: Minimum person score to keep a proposal.
+        nms_threshold: IoU threshold for non-maximum suppression.
+
+    Returns:
+        Final person detections after thresholding and NMS.
+    """
+
+    _assert_expected_yolo11_row_count(rows, padded_width=padded_width, padded_height=padded_height)
+
+    proposals: list[Detection] = []
+    for row in rows:
+        person_score = float(row[4 + PERSON_CLASS_ID])
+        if person_score < prob_threshold:
+            continue
+
+        center_x = float(row[0])
+        center_y = float(row[1])
+        box_width = float(row[2])
+        box_height = float(row[3])
+        detection = _detection_from_padded_xyxy(
+            padded_x0=center_x - (box_width / 2),
+            padded_y0=center_y - (box_height / 2),
+            padded_x1=center_x + (box_width / 2),
+            padded_y1=center_y + (box_height / 2),
+            score=person_score,
+            image_width=image_width,
+            image_height=image_height,
+            scale=scale,
+            wpad=wpad,
+            hpad=hpad,
+        )
+        if detection is not None:
+            proposals.append(detection)
 
     proposals.sort(key=lambda detection: detection.score, reverse=True)
     return _nms(proposals, nms_threshold)
@@ -461,7 +588,7 @@ def _as_yolo11_rows(output: np.ndarray) -> np.ndarray:
         output: Raw NCNN output tensor converted to NumPy.
 
     Returns:
-        Two-dimensional array shaped as `rows x 144`.
+        Two-dimensional array shaped as `rows x output_width`.
 
     Raises:
         ValueError: If the output tensor shape is unsupported.
@@ -471,13 +598,96 @@ def _as_yolo11_rows(output: np.ndarray) -> np.ndarray:
     if squeezed.ndim != 2:
         raise ValueError(f"expected YOLO11 output to be 2D, got shape {output.shape}")
 
-    expected_width = YOLO11_REG_MAX * 4 + YOLO11_COCO_CLASS_COUNT
-    if squeezed.shape[1] == expected_width:
+    expected_widths = (YOLO11_RAW_OUTPUT_WIDTH, YOLO11_DECODED_OUTPUT_WIDTH)
+    if squeezed.shape[1] in expected_widths:
         return squeezed
-    if squeezed.shape[0] == expected_width:
+    if squeezed.shape[0] in expected_widths:
         return squeezed.T
 
-    raise ValueError(f"expected one YOLO11 output dimension to be {expected_width}, got {output.shape}")
+    formatted = " or ".join(str(width) for width in expected_widths)
+    raise ValueError(f"expected one YOLO11 output dimension to be {formatted}, got {output.shape}")
+
+
+def _assert_expected_yolo11_row_count(rows: np.ndarray, *, padded_width: int, padded_height: int) -> None:
+    """Validate the YOLO11 output row count for the padded input size.
+
+    Args:
+        rows: Row-major YOLO11 output tensor.
+        padded_width: Width of the padded model input.
+        padded_height: Height of the padded model input.
+
+    Raises:
+        ValueError: If the row count does not match the expected YOLO11 grids.
+    """
+
+    expected_rows = _expected_yolo11_row_count(padded_width=padded_width, padded_height=padded_height)
+    if rows.shape[0] != expected_rows:
+        raise ValueError(f"expected {expected_rows} YOLO11 rows for padded input, got {rows.shape[0]}")
+
+
+def _expected_yolo11_row_count(*, padded_width: int, padded_height: int) -> int:
+    """Compute the YOLO11 candidate count for a padded input size.
+
+    Args:
+        padded_width: Width of the padded model input.
+        padded_height: Height of the padded model input.
+
+    Returns:
+        Sum of all stride-grid candidate counts.
+    """
+
+    return sum((padded_width // stride) * (padded_height // stride) for stride in YOLO11_STRIDES)
+
+
+def _detection_from_padded_xyxy(
+    *,
+    padded_x0: float,
+    padded_y0: float,
+    padded_x1: float,
+    padded_y1: float,
+    score: float,
+    image_width: int,
+    image_height: int,
+    scale: float,
+    wpad: int,
+    hpad: int,
+) -> Detection | None:
+    """Convert one padded-input box into an original-image detection.
+
+    Args:
+        padded_x0: Left box coordinate in padded model-input pixels.
+        padded_y0: Top box coordinate in padded model-input pixels.
+        padded_x1: Right box coordinate in padded model-input pixels.
+        padded_y1: Bottom box coordinate in padded model-input pixels.
+        score: Person confidence score.
+        image_width: Original image width.
+        image_height: Original image height.
+        scale: Resize scale applied before padding.
+        wpad: Horizontal padding added after resize.
+        hpad: Vertical padding added after resize.
+
+    Returns:
+        Detection in original image coordinates, or `None` when the clipped box
+        has no positive area.
+    """
+
+    x0 = _clip((padded_x0 - (wpad / 2)) / scale, 0.0, image_width - 1.0)
+    y0 = _clip((padded_y0 - (hpad / 2)) / scale, 0.0, image_height - 1.0)
+    x1 = _clip((padded_x1 - (wpad / 2)) / scale, 0.0, image_width - 1.0)
+    y1 = _clip((padded_y1 - (hpad / 2)) / scale, 0.0, image_height - 1.0)
+
+    if x1 <= x0 or y1 <= y0:
+        return None
+
+    return Detection(
+        label=COCO_PERSON_LABEL,
+        class_id=PERSON_CLASS_ID,
+        score=score,
+        x=x0,
+        y=y0,
+        width=x1 - x0,
+        height=y1 - y0,
+    )
 
 
 def _decode_ltrb(raw: np.ndarray) -> np.ndarray:

@@ -67,5 +67,8 @@ Desktop.ini
 context-docs/
 
 # Model artifacts
+*.pt
+*_ncnn_model/
 models/**/*.bin
 models/**/*.param
+models/**/metadata.yaml

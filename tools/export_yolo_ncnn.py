@@ -4,27 +4,33 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
-DEFAULT_OUTPUT_DIR = Path("models/person-detector/yolo11n-ncnn")
+DEFAULT_OUTPUT_DIR = Path("models/yolo11n-ncnn")
 
 
 @dataclass(frozen=True)
 class NcnnExportFiles:
-    """Resolved NCNN export file pair.
+    """Resolved NCNN export artifacts.
 
     Attributes:
         param_path: Path to the exported NCNN `.param` file.
         bin_path: Path to the exported NCNN `.bin` file.
+        metadata_path: Optional path to Ultralytics export metadata.
     """
 
     param_path: Path
     bin_path: Path
+    metadata_path: Path | None = None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -49,7 +55,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_DIR,
-        help=f"Install directory for model.ncnn.param/bin. Default: {DEFAULT_OUTPUT_DIR}",
+        help=f"Install directory for NCNN artifacts. Default: {DEFAULT_OUTPUT_DIR}",
     )
     parser.add_argument(
         "--imgsz",
@@ -60,7 +66,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing model.ncnn.param/bin in the output directory.",
+        help="Overwrite existing NCNN artifacts in the output directory.",
     )
     return parser.parse_args(argv)
 
@@ -76,12 +82,16 @@ def main(argv: list[str] | None = None) -> int:
     """
 
     args = parse_args(argv)
+    output_dir = args.output_dir.resolve()
+    local_model_path = _resolve_existing_model_path(args.model)
     try:
-        _assert_output_available(args.output_dir, force=args.force)
+        _assert_output_available(output_dir, force=args.force)
         yolo_cls = _load_ultralytics_yolo()
-        export_path = _export_to_ncnn(yolo_cls, model=args.model, imgsz=args.imgsz)
-        exported_files = _resolve_ncnn_files(export_path)
-        installed_files = _install_ncnn_files(exported_files, args.output_dir, force=args.force)
+        with _temporary_working_directory() as export_dir:
+            model = _prepare_model_argument(args.model, local_model_path=local_model_path, export_dir=export_dir)
+            export_path = _export_to_ncnn(yolo_cls, model=model, imgsz=args.imgsz)
+            exported_files = _resolve_ncnn_files(export_path)
+            installed_files = _install_ncnn_files(exported_files, output_dir, force=args.force)
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -89,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"NCNN model installed in: {installed_files.param_path.parent}")
     print(f"- {installed_files.param_path}")
     print(f"- {installed_files.bin_path}")
+    if installed_files.metadata_path is not None:
+        print(f"- {installed_files.metadata_path}")
     return 0
 
 
@@ -108,9 +120,65 @@ def _load_ultralytics_yolo() -> Any:
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "ultralytics is required only for export. Run with: "
-            "uv run --with ultralytics python tools/export_yolo_ncnn.py"
+            "uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py"
         ) from exc
     return YOLO
+
+
+def _resolve_existing_model_path(model: str) -> Path | None:
+    """Resolve an existing local model path.
+
+    Args:
+        model: Ultralytics model name, URL, or local `.pt` path.
+
+    Returns:
+        Absolute local path when `model` exists on disk, otherwise `None`.
+    """
+
+    path = Path(model).expanduser()
+    if path.exists():
+        return path.resolve()
+    return None
+
+
+def _prepare_model_argument(model: str, *, local_model_path: Path | None, export_dir: Path) -> str:
+    """Prepare the model argument passed to Ultralytics inside temp export dir.
+
+    Args:
+        model: Original Ultralytics model name, URL, or local `.pt` path.
+        local_model_path: Resolved local model file when `model` exists on disk.
+        export_dir: Temporary directory used for the Ultralytics export.
+
+    Returns:
+        Temporary local model path when a local file exists, otherwise the
+        original model string.
+    """
+
+    if local_model_path is None:
+        return model
+
+    temp_model_path = export_dir / local_model_path.name
+    if local_model_path != temp_model_path:
+        shutil.copy2(local_model_path, temp_model_path)
+    return str(temp_model_path)
+
+
+@contextmanager
+def _temporary_working_directory() -> Iterator[Path]:
+    """Run Ultralytics export inside a disposable working directory.
+
+    Yields:
+        Temporary directory used as the current working directory.
+    """
+
+    original_cwd = Path.cwd()
+    with tempfile.TemporaryDirectory(prefix="vision-hub-yolo-export-") as temp_dir:
+        temp_path = Path(temp_dir).resolve()
+        os.chdir(temp_path)
+        try:
+            yield temp_path
+        finally:
+            os.chdir(original_cwd)
 
 
 def _export_to_ncnn(yolo_cls: Any, *, model: str, imgsz: int) -> Path:
@@ -175,7 +243,7 @@ def _resolve_ncnn_files(path: Path) -> NcnnExportFiles:
         path: Export directory or direct `.param` path.
 
     Returns:
-        Resolved NCNN export file pair.
+        Resolved NCNN export artifacts.
 
     Raises:
         ValueError: If the path is ambiguous or not a `.param` file.
@@ -209,7 +277,7 @@ def _pair_from_param(param_path: Path) -> NcnnExportFiles:
         param_path: Path to the NCNN `.param` file.
 
     Returns:
-        Resolved NCNN export file pair.
+        Resolved NCNN export artifacts.
 
     Raises:
         FileNotFoundError: If the sibling `.bin` file is missing.
@@ -218,14 +286,19 @@ def _pair_from_param(param_path: Path) -> NcnnExportFiles:
     bin_path = param_path.with_suffix(".bin")
     if not bin_path.exists():
         raise FileNotFoundError(f"missing NCNN .bin file beside {param_path}")
-    return NcnnExportFiles(param_path=param_path, bin_path=bin_path)
+    metadata_path = param_path.parent / "metadata.yaml"
+    return NcnnExportFiles(
+        param_path=param_path,
+        bin_path=bin_path,
+        metadata_path=metadata_path if metadata_path.exists() else None,
+    )
 
 
 def _install_ncnn_files(files: NcnnExportFiles, output_dir: Path, *, force: bool) -> NcnnExportFiles:
     """Copy NCNN artifacts into Vision-Hub's stable model directory.
 
     Args:
-        files: Exported NCNN files to install.
+        files: Exported NCNN files and optional metadata to install.
         output_dir: Destination directory used by the Vision-Hub runtime.
         force: Whether existing destination files may be overwritten.
 
@@ -241,13 +314,25 @@ def _install_ncnn_files(files: NcnnExportFiles, output_dir: Path, *, force: bool
 
     target_param = output_dir / "model.ncnn.param"
     target_bin = output_dir / "model.ncnn.bin"
-    for target in (target_param, target_bin):
+    target_metadata = output_dir / "metadata.yaml"
+    for target in (target_param, target_bin, target_metadata):
         if target.exists() and not force:
             raise FileExistsError(f"{target} already exists; pass --force to overwrite it")
 
     shutil.copy2(files.param_path, target_param)
     shutil.copy2(files.bin_path, target_bin)
-    return NcnnExportFiles(param_path=target_param, bin_path=target_bin)
+    installed_metadata = None
+    if files.metadata_path is not None:
+        shutil.copy2(files.metadata_path, target_metadata)
+        installed_metadata = target_metadata
+    elif target_metadata.exists() and force:
+        target_metadata.unlink()
+
+    return NcnnExportFiles(
+        param_path=target_param,
+        bin_path=target_bin,
+        metadata_path=installed_metadata,
+    )
 
 
 def _assert_output_available(output_dir: Path, *, force: bool) -> None:
@@ -265,7 +350,11 @@ def _assert_output_available(output_dir: Path, *, force: bool) -> None:
     if force:
         return
 
-    for target in (output_dir / "model.ncnn.param", output_dir / "model.ncnn.bin"):
+    for target in (
+        output_dir / "model.ncnn.param",
+        output_dir / "model.ncnn.bin",
+        output_dir / "metadata.yaml",
+    ):
         if target.exists():
             raise FileExistsError(f"{target} already exists; pass --force to overwrite it")
 

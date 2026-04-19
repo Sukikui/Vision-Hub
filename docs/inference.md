@@ -38,17 +38,19 @@ Model files are runtime assets, not Python source files.
 Standard deployment path:
 
 ```text
-/opt/vision-hub/models/person-detector/yolo11n-ncnn/
+/opt/vision-hub/models/yolo11n-ncnn/
   model.ncnn.param
   model.ncnn.bin
+  metadata.yaml
 ```
 
 Local development path:
 
 ```text
-models/person-detector/yolo11n-ncnn/
+models/yolo11n-ncnn/
   model.ncnn.param
   model.ncnn.bin
+  metadata.yaml
 ```
 
 Docker uses the same logical contract: the host model directory is mounted read-only into the Vision-Hub container.
@@ -65,8 +67,9 @@ Example:
 | --- | --- | --- |
 | `model.ncnn.param` | NCNN graph definition | `ncnn.Net.load_param()` |
 | `model.ncnn.bin` | model weights | `ncnn.Net.load_model()` |
+| `metadata.yaml` | export metadata, labels, image size, export/runtime provenance | Vision-Hub operators and diagnostics |
 
-The `ncnn` Python dependency provides the runtime, not the YOLO weights. The weights must be provisioned as model artifacts before the service starts.
+The `ncnn` Python dependency provides the runtime, not the YOLO weights. The weights and metadata must be provisioned as model artifacts before the service starts.
 
 Supported file layouts:
 
@@ -90,20 +93,20 @@ This tool is not part of the long-running hub service. It is used during system 
 Default command:
 
 ```bash
-uv run --with ultralytics python tools/export_yolo_ncnn.py \
+uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py \
   --model yolo11n.pt \
-  --output-dir models/person-detector/yolo11n-ncnn
+  --output-dir models/yolo11n-ncnn
 ```
 
 Production command for the Raspberry Pi model directory:
 
 ```bash
-uv run --with ultralytics python tools/export_yolo_ncnn.py \
+uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py \
   --model yolo11n.pt \
-  --output-dir /opt/vision-hub/models/person-detector/yolo11n-ncnn
+  --output-dir /opt/vision-hub/models/yolo11n-ncnn
 ```
 
-Use `--force` to replace existing `model.ncnn.param` and `model.ncnn.bin` files.
+Use `--force` to replace existing `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` files.
 
 The tool performs this sequence:
 
@@ -112,12 +115,12 @@ The tool performs this sequence:
 | 1 | load `yolo11n.pt` through Ultralytics |
 | 2 | export the model with `format="ncnn"` and `imgsz=640` |
 | 3 | locate the generated `.param` and `.bin` files |
-| 4 | copy them as `model.ncnn.param` and `model.ncnn.bin` |
+| 4 | copy them as `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` |
 | 5 | leave the runtime model directory ready for `NcnnYolo11PersonDetector` |
 
-Ultralytics controls the raw export directory name, typically `yolo11n_ncnn_model/`. Vision-Hub copies the generated artifacts into a stable runtime path so the service always loads the same file names from the same directory.
+Ultralytics controls the raw export directory name, typically `yolo11n_ncnn_model/`. Vision-Hub runs that export in a temporary working directory, then copies only the required NCNN artifacts into a stable runtime path so the service always loads the same file names from the same directory.
 
-`ultralytics` is installed only for the export command through `uv --with ultralytics`. It is not declared as a Vision-Hub runtime dependency.
+`ultralytics` and `pnnx` are installed only for the export command through `uv --with ...`. They are not declared as Vision-Hub runtime dependencies.
 
 ## Model Import Flow
 
@@ -133,7 +136,7 @@ NCNN loads the model files:
 
 ```python
 detector = NcnnYolo11PersonDetector(
-    model_path="/opt/vision-hub/models/person-detector/yolo11n-ncnn",
+    model_path="/opt/vision-hub/models/yolo11n-ncnn",
     target_size=640,
     prob_threshold=0.25,
     nms_threshold=0.45,
@@ -193,7 +196,15 @@ The detector keeps the resize scale and padding values so decoded boxes can be p
 
 ## YOLO11 Output Contract
 
-The decoder expects YOLO11 COCO output rows with this layout:
+The default Ultralytics NCNN export embeds YOLO box decoding and class sigmoid in the NCNN graph. Vision-Hub accepts that exported output directly:
+
+| Segment | Size | Meaning |
+| --- | --- | --- |
+| decoded box | `4` | `x_center`, `y_center`, `width`, `height` |
+| class scores | `80` | one sigmoid score per COCO class |
+| total | `84` | `4 + 80` |
+
+Vision-Hub also supports a raw YOLO11 output layout:
 
 | Segment | Size | Meaning |
 | --- | --- | --- |
@@ -214,12 +225,16 @@ Accepted tensor layouts:
 
 | Layout | Handling |
 | --- | --- |
+| `8400 x 84` | used directly as Ultralytics-exported decoded rows |
+| `84 x 8400` | transposed before decoding |
 | `8400 x 144` | used directly |
 | `144 x 8400` | transposed before decoding |
 
 ## Box Decoding
 
-YOLO11 represents each box side as a distribution over `16` bins.
+For the standard Ultralytics NCNN export, box decoding is already part of the NCNN graph. Vision-Hub receives `x_center`, `y_center`, `width`, and `height`, then projects the box back from padded model-input coordinates into original image coordinates.
+
+For raw YOLO11 output, Vision-Hub decodes the boxes itself. YOLO11 represents each box side as a distribution over `16` bins.
 
 | Side | Raw values |
 | --- | --- |
@@ -237,7 +252,7 @@ distance = sum(probabilities[i] * i)
 
 That distance is then multiplied by the stride of the grid level. The four decoded distances are interpreted as `left`, `top`, `right`, and `bottom` offsets from the grid cell center.
 
-`softmax` is only used for box distance decoding. It is not used to select the object class.
+`softmax` is only used for raw-output box distance decoding. It is not used to select the object class.
 
 ## Person Score Decoding
 
@@ -245,6 +260,19 @@ The detector keeps only the COCO `person` class:
 
 ```text
 PERSON_CLASS_ID = 0
+```
+
+For the standard Ultralytics NCNN export:
+
+```text
+person_score = row[4 + PERSON_CLASS_ID]
+```
+
+The score is already sigmoid-normalized by the NCNN graph.
+
+For raw YOLO11 output:
+
+```text
 person_logit = row[64 + PERSON_CLASS_ID]
 person_score = sigmoid(person_logit)
 ```
@@ -253,8 +281,8 @@ This is class filtering, not a smaller inference pass. The full YOLO model still
 
 | Function | Used for |
 | --- | --- |
-| `softmax` | distribution-to-distance conversion for boxes |
-| `sigmoid` | person class confidence |
+| `softmax` | raw-output distribution-to-distance conversion for boxes |
+| `sigmoid` | raw-output person class confidence |
 
 ## NMS
 

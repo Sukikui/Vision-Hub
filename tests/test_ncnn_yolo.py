@@ -10,6 +10,7 @@ from vision_hub.inference.ncnn_yolo import (
     Detection,
     PersonDetectionResult,
     _as_yolo11_rows,
+    _decode_exported_person_detections,
     _decode_person_detections,
     _nms,
     resolve_ncnn_model_files,
@@ -43,6 +44,15 @@ class NcnnYoloTest(unittest.TestCase):
 
         self.assertEqual(rows.shape, (8400, 144))
 
+    def test_output_rows_accepts_ultralytics_exported_shape(self) -> None:
+        """Normalize Ultralytics NCNN output into row-major shape."""
+
+        output = np.zeros((84, 8400), dtype=np.float32)
+
+        rows = _as_yolo11_rows(output)
+
+        self.assertEqual(rows.shape, (8400, 84))
+
     def test_decodes_person_detection_only(self) -> None:
         """Decode only the COCO person class from YOLO rows."""
 
@@ -67,6 +77,34 @@ class NcnnYoloTest(unittest.TestCase):
         self.assertEqual(len(detections), 1)
         self.assertEqual(detections[0].label, "person")
         self.assertGreater(detections[0].score, 0.99)
+
+    def test_decodes_ultralytics_exported_person_detection(self) -> None:
+        """Decode person detections from Ultralytics NCNN exported rows."""
+
+        rows = np.zeros((8400, 84), dtype=np.float32)
+        rows[0, 0:4] = [100.0, 120.0, 40.0, 60.0]
+        rows[0, 4] = 0.91
+
+        detections = _decode_exported_person_detections(
+            rows=rows,
+            padded_width=640,
+            padded_height=640,
+            image_width=640,
+            image_height=640,
+            scale=1.0,
+            wpad=0,
+            hpad=0,
+            prob_threshold=0.25,
+            nms_threshold=0.45,
+        )
+
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].label, "person")
+        self.assertAlmostEqual(detections[0].score, 0.91)
+        self.assertAlmostEqual(detections[0].x, 80.0)
+        self.assertAlmostEqual(detections[0].y, 90.0)
+        self.assertAlmostEqual(detections[0].width, 40.0)
+        self.assertAlmostEqual(detections[0].height, 60.0)
 
     def test_rejects_unexpected_yolo_row_count(self) -> None:
         """Reject YOLO outputs whose row count does not match input geometry."""

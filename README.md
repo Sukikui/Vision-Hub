@@ -34,7 +34,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Field DHCP | dnsmasq configured from `deploy/dnsmasq/` |
 | Local MQTT | Mosquitto configured from `deploy/mosquitto/` |
 | AI model | YOLO11n exported to NCNN with `tools/export_yolo_ncnn.py` |
-| Model files | `model.ncnn.param` and `model.ncnn.bin` present in the model directory |
+| Model files | `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` present in the model directory |
 | Field network | ESP32 nodes can reach the Raspberry Pi MQTT broker, typically on port `1883` |
 
 ## Getting Started
@@ -70,19 +70,20 @@ Mosquitto configuration for the local MQTT broker is stored in [`deploy/mosquitt
 ### 4. Export the Person Detection Model
 
 ```bash
-uv run --with ultralytics python tools/export_yolo_ncnn.py \
+uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py \
   --model yolo11n.pt \
-  --output-dir /opt/vision-hub/models/person-detector/yolo11n-ncnn
+  --output-dir /opt/vision-hub/models/yolo11n-ncnn
 ```
 
-The export tool uses Ultralytics only during provisioning. The Vision-Hub service does not depend on Ultralytics at runtime.
+The export tool uses Ultralytics and PNNX only during provisioning. The Vision-Hub service does not depend on them at runtime.
 
-Ultralytics creates its NCNN export in a generated folder such as `yolo11n_ncnn_model/`. The Vision-Hub tool then installs the resulting `.param` and `.bin` files into the stable directory used by the runtime:
+Ultralytics creates its NCNN export in a temporary generated folder such as `yolo11n_ncnn_model/`. The Vision-Hub tool then installs the runtime `.param`/`.bin` files and the export metadata into the stable directory used by the service:
 
 ```text
-/opt/vision-hub/models/person-detector/yolo11n-ncnn/
+/opt/vision-hub/models/yolo11n-ncnn/
   model.ncnn.param
   model.ncnn.bin
+  metadata.yaml
 ```
 
 Model artifacts are not versioned in Git.
@@ -98,9 +99,9 @@ uv run python main.py
 ### Local Model Export
 
 ```bash
-uv run --with ultralytics python tools/export_yolo_ncnn.py \
+uv run --with ultralytics --with pnnx python tools/export_yolo_ncnn.py \
   --model yolo11n.pt \
-  --output-dir models/person-detector/yolo11n-ncnn
+  --output-dir models/yolo11n-ncnn
 ```
 
 ### Run Tests
