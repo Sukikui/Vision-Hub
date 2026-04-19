@@ -6,6 +6,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 
 ## Documentation
 
+- [Deployment](docs/deployment.md)
 - [Inference](docs/inference.md)
 
 ## System Overview
@@ -18,6 +19,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Runtime | Python `>=3.13` |
 | Package manager | `uv` |
 | Local MQTT broker | Mosquitto |
+| Field DHCP server | dnsmasq |
 | MQTT client | `paho-mqtt` |
 | Configuration | YAML |
 | Inference runtime | NCNN |
@@ -28,7 +30,9 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Item | Requirement |
 | --- | --- |
 | Python environment | project `.venv` created with `uv sync` |
-| Local MQTT | Mosquitto installed, enabled, and reachable by the ESP32 nodes |
+| Field interface | Raspberry Pi Ethernet configured from `deploy/rpi/` |
+| Field DHCP | dnsmasq configured from `deploy/dnsmasq/` |
+| Local MQTT | Mosquitto configured from `deploy/mosquitto/` |
 | AI model | YOLO11n exported to NCNN with `tools/export_yolo_ncnn.py` |
 | Model files | `model.ncnn.param` and `model.ncnn.bin` present in the model directory |
 | Field network | ESP32 nodes can reach the Raspberry Pi MQTT broker, typically on port `1883` |
@@ -57,15 +61,11 @@ uv sync
 
 `uv sync` creates the project `.venv` if it does not already exist, then installs dependencies from `pyproject.toml` and `uv.lock`.
 
-### 3. Install the MQTT Broker
+### 3. Configure Field Network Services
 
-```bash
-sudo apt update
-sudo apt install mosquitto mosquitto-clients
-sudo systemctl enable --now mosquitto
-```
-
-The ESP32 nodes must be able to reach the Raspberry Pi broker on the field Ethernet network, typically on port `1883`.
+Raspberry Pi field interface configuration is stored in [`deploy/rpi/`](deploy/rpi/).
+DHCP configuration for the ESP32 field network is stored in [`deploy/dnsmasq/`](deploy/dnsmasq/).
+Mosquitto configuration for the local MQTT broker is stored in [`deploy/mosquitto/`](deploy/mosquitto/).
 
 ### 4. Export the Person Detection Model
 
