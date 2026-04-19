@@ -1,3 +1,5 @@
+"""NCNN-backed YOLO11 person detector."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,12 +19,31 @@ YOLO11_COCO_CLASS_COUNT = 80
 
 @dataclass(frozen=True)
 class NcnnModelFiles:
+    """Resolved NCNN model file pair.
+
+    Attributes:
+        param_path: Path to the NCNN `.param` graph file.
+        bin_path: Path to the NCNN `.bin` weights file.
+    """
+
     param_path: Path
     bin_path: Path
 
 
 @dataclass(frozen=True)
 class Detection:
+    """One object detection in original image coordinates.
+
+    Attributes:
+        label: Human-readable class label.
+        class_id: Numeric class id from the source model.
+        score: Confidence score after post-processing.
+        x: Left coordinate in original image pixels.
+        y: Top coordinate in original image pixels.
+        width: Box width in original image pixels.
+        height: Box height in original image pixels.
+    """
+
     label: str
     class_id: int
     score: float
@@ -32,6 +53,12 @@ class Detection:
     height: float
 
     def to_dict(self) -> dict[str, float | int | str]:
+        """Convert the detection into a JSON-serializable dictionary.
+
+        Returns:
+            Detection fields as primitive Python values.
+        """
+
         return {
             "label": self.label,
             "class_id": self.class_id,
@@ -45,12 +72,27 @@ class Detection:
 
 @dataclass(frozen=True)
 class PersonDetectionResult:
+    """Result returned by the person detector.
+
+    Attributes:
+        person_detected: Whether at least one person remains after NMS.
+        person_count: Number of person detections after NMS.
+        best_score: Highest person score, or `None` when no person is found.
+        detections: Final person detections in descending score order.
+    """
+
     person_detected: bool
     person_count: int
     best_score: float | None
     detections: tuple[Detection, ...]
 
     def to_dict(self) -> dict[str, Any]:
+        """Convert the result into a JSON-serializable dictionary.
+
+        Returns:
+            Result fields as primitive Python values and nested dictionaries.
+        """
+
         return {
             "person_detected": self.person_detected,
             "person_count": self.person_count,
@@ -74,6 +116,23 @@ class NcnnYolo11PersonDetector:
         input_name: str = "in0",
         output_name: str = "out0",
     ) -> None:
+        """Load a NCNN YOLO11 model for person detection.
+
+        Args:
+            model_path: Directory containing NCNN files or direct `.param` path.
+            target_size: Long-side inference size before stride padding.
+            prob_threshold: Minimum person confidence to keep a proposal.
+            nms_threshold: IoU threshold for non-maximum suppression.
+            num_threads: Number of NCNN CPU threads.
+            use_vulkan: Whether to enable NCNN Vulkan compute.
+            input_name: NCNN input blob name.
+            output_name: NCNN output blob name.
+
+        Raises:
+            ValueError: If numeric configuration values are invalid.
+            RuntimeError: If NCNN cannot load the model files.
+        """
+
         if target_size <= 0:
             raise ValueError("target_size must be > 0")
         if not 0.0 <= prob_threshold <= 1.0:
@@ -95,6 +154,19 @@ class NcnnYolo11PersonDetector:
         self._net = self._load_net()
 
     def detect_path(self, image_path: str | Path) -> PersonDetectionResult:
+        """Run person detection on an image file.
+
+        Args:
+            image_path: Path to an image readable by OpenCV.
+
+        Returns:
+            Person detection result.
+
+        Raises:
+            ValueError: If the image cannot be read.
+            RuntimeError: If NCNN inference fails.
+        """
+
         import cv2
 
         image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
@@ -103,6 +175,20 @@ class NcnnYolo11PersonDetector:
         return self.detect_bgr(image)
 
     def detect_bgr(self, image: np.ndarray) -> PersonDetectionResult:
+        """Run person detection on an in-memory BGR image.
+
+        Args:
+            image: BGR `uint8` image with shape `H x W x 3`.
+
+        Returns:
+            Person detection result.
+
+        Raises:
+            ValueError: If the image shape is not supported or model output has
+                an unexpected shape.
+            RuntimeError: If NCNN inference fails.
+        """
+
         if image.ndim != 3 or image.shape[2] != 3:
             raise ValueError("image must be a BGR uint8 array with shape HxWx3")
 
@@ -137,6 +223,15 @@ class NcnnYolo11PersonDetector:
         )
 
     def _load_net(self):
+        """Load NCNN graph and weights into a `ncnn.Net` instance.
+
+        Returns:
+            Loaded NCNN network.
+
+        Raises:
+            RuntimeError: If NCNN fails to load either file.
+        """
+
         net = ncnn.Net()
         net.opt.use_vulkan_compute = self.use_vulkan
         net.opt.num_threads = self.num_threads
@@ -152,6 +247,16 @@ class NcnnYolo11PersonDetector:
         return net
 
     def _preprocess(self, image: np.ndarray):
+        """Resize, pad, convert, and normalize a BGR image for YOLO11.
+
+        Args:
+            image: BGR image with shape `H x W x 3`.
+
+        Returns:
+            Tuple containing the padded NCNN input matrix, resize scale,
+            horizontal padding, and vertical padding.
+        """
+
         image_height, image_width = image.shape[:2]
 
         width = image_width
@@ -193,6 +298,18 @@ class NcnnYolo11PersonDetector:
 
 
 def resolve_ncnn_model_files(model_path: str | Path) -> NcnnModelFiles:
+    """Resolve a model directory or `.param` path into NCNN model files.
+
+    Args:
+        model_path: Directory containing NCNN files or direct `.param` path.
+
+    Returns:
+        Resolved `.param` and `.bin` file paths.
+
+    Raises:
+        ValueError: If the path does not identify a valid NCNN model pair.
+    """
+
     path = Path(model_path)
     if path.is_dir():
         return _resolve_model_dir(path)
@@ -202,6 +319,18 @@ def resolve_ncnn_model_files(model_path: str | Path) -> NcnnModelFiles:
 
 
 def _resolve_model_dir(path: Path) -> NcnnModelFiles:
+    """Find NCNN model files inside a directory.
+
+    Args:
+        path: Directory to inspect.
+
+    Returns:
+        Resolved `.param` and `.bin` file paths.
+
+    Raises:
+        ValueError: If no unambiguous model file pair can be found.
+    """
+
     preferred = (
         path / "model.ncnn.param",
         path / "yolo11n.ncnn.param",
@@ -218,6 +347,18 @@ def _resolve_model_dir(path: Path) -> NcnnModelFiles:
 
 
 def _pair_from_param(param_path: Path) -> NcnnModelFiles:
+    """Resolve a `.param` file and its sibling `.bin` file.
+
+    Args:
+        param_path: Path to the NCNN `.param` file.
+
+    Returns:
+        Resolved model file pair.
+
+    Raises:
+        ValueError: If either file does not exist.
+    """
+
     bin_path = param_path.with_suffix(".bin")
     if not param_path.exists():
         raise ValueError(f"NCNN param file does not exist: {param_path}")
@@ -239,6 +380,27 @@ def _decode_person_detections(
     prob_threshold: float,
     nms_threshold: float,
 ) -> list[Detection]:
+    """Decode YOLO11 output rows into person detections.
+
+    Args:
+        rows: YOLO11 output rows with box distributions and class logits.
+        padded_width: Width of the padded model input.
+        padded_height: Height of the padded model input.
+        image_width: Original image width.
+        image_height: Original image height.
+        scale: Resize scale applied before padding.
+        wpad: Horizontal padding added after resize.
+        hpad: Vertical padding added after resize.
+        prob_threshold: Minimum person score to keep a proposal.
+        nms_threshold: IoU threshold for non-maximum suppression.
+
+    Returns:
+        Final person detections after thresholding and NMS.
+
+    Raises:
+        ValueError: If the row count does not match the padded input geometry.
+    """
+
     proposals: list[Detection] = []
     row_offset = 0
     expected_rows = sum((padded_width // stride) * (padded_height // stride) for stride in YOLO11_STRIDES)
@@ -293,6 +455,18 @@ def _decode_person_detections(
 
 
 def _as_yolo11_rows(output: np.ndarray) -> np.ndarray:
+    """Normalize a NCNN YOLO11 output tensor to row-major shape.
+
+    Args:
+        output: Raw NCNN output tensor converted to NumPy.
+
+    Returns:
+        Two-dimensional array shaped as `rows x 144`.
+
+    Raises:
+        ValueError: If the output tensor shape is unsupported.
+    """
+
     squeezed = np.squeeze(output).astype(np.float32, copy=False)
     if squeezed.ndim != 2:
         raise ValueError(f"expected YOLO11 output to be 2D, got shape {output.shape}")
@@ -307,6 +481,15 @@ def _as_yolo11_rows(output: np.ndarray) -> np.ndarray:
 
 
 def _decode_ltrb(raw: np.ndarray) -> np.ndarray:
+    """Decode YOLO11 DFL side distributions into LTRB distances.
+
+    Args:
+        raw: Flattened box distribution values for one YOLO row.
+
+    Returns:
+        Array of decoded left, top, right, and bottom distances.
+    """
+
     distances = raw.reshape(4, YOLO11_REG_MAX)
     probabilities = _softmax(distances, axis=1)
     bins = np.arange(YOLO11_REG_MAX, dtype=np.float32)
@@ -314,6 +497,16 @@ def _decode_ltrb(raw: np.ndarray) -> np.ndarray:
 
 
 def _nms(detections: list[Detection], threshold: float) -> list[Detection]:
+    """Apply non-maximum suppression to sorted detections.
+
+    Args:
+        detections: Candidate detections sorted by descending score.
+        threshold: IoU threshold above which a detection is suppressed.
+
+    Returns:
+        Detections kept after suppression.
+    """
+
     picked: list[Detection] = []
     for detection in detections:
         if all(_iou(detection, existing) <= threshold for existing in picked):
@@ -322,6 +515,16 @@ def _nms(detections: list[Detection], threshold: float) -> list[Detection]:
 
 
 def _iou(a: Detection, b: Detection) -> float:
+    """Compute intersection-over-union for two detections.
+
+    Args:
+        a: First detection.
+        b: Second detection.
+
+    Returns:
+        IoU value in the range `0.0` to `1.0`.
+    """
+
     ax1, ay1, ax2, ay2 = a.x, a.y, a.x + a.width, a.y + a.height
     bx1, by1, bx2, by2 = b.x, b.y, b.x + b.width, b.y + b.height
 
@@ -340,14 +543,44 @@ def _iou(a: Detection, b: Detection) -> float:
 
 
 def _sigmoid(value: float | np.ndarray) -> float | np.ndarray:
+    """Apply the logistic sigmoid function.
+
+    Args:
+        value: Scalar or NumPy array of logits.
+
+    Returns:
+        Scalar or array mapped to the range `0.0` to `1.0`.
+    """
+
     return 1.0 / (1.0 + np.exp(-value))
 
 
 def _softmax(values: np.ndarray, axis: int) -> np.ndarray:
+    """Apply numerically stable softmax along one axis.
+
+    Args:
+        values: Input logits.
+        axis: Axis over which probabilities are normalized.
+
+    Returns:
+        Probability array with the same shape as `values`.
+    """
+
     shifted = values - np.max(values, axis=axis, keepdims=True)
     exp = np.exp(shifted)
     return exp / np.sum(exp, axis=axis, keepdims=True)
 
 
 def _clip(value: float, minimum: float, maximum: float) -> float:
+    """Clamp a scalar value to an inclusive range.
+
+    Args:
+        value: Value to clamp.
+        minimum: Inclusive lower bound.
+        maximum: Inclusive upper bound.
+
+    Returns:
+        Clamped value.
+    """
+
     return max(min(value, maximum), minimum)

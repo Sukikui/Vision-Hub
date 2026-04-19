@@ -1,3 +1,5 @@
+"""MQTT topic helpers for the ESP32 Vision Node protocol."""
+
 from __future__ import annotations
 
 import re
@@ -10,6 +12,8 @@ class TopicError(ValueError):
 
 
 class IncomingTopicKind(StrEnum):
+    """Known incoming topic categories published by ESP32 nodes."""
+
     PRESENCE = "presence"
     HEARTBEAT = "heartbeat"
     EVENT = "event"
@@ -20,6 +24,8 @@ class IncomingTopicKind(StrEnum):
 
 
 class CommandName(StrEnum):
+    """MQTT command names accepted by ESP32 nodes."""
+
     PING = "ping"
     CONFIG = "config"
     REBOOT = "reboot"
@@ -28,6 +34,16 @@ class CommandName(StrEnum):
 
 @dataclass(frozen=True)
 class IncomingTopic:
+    """Parsed representation of an incoming MQTT topic.
+
+    Attributes:
+        kind: Type of incoming message carried by the topic.
+        node_id: ESP32 node identifier from the topic path.
+        request_id: Command request id for reply topics.
+        capture_id: Capture identifier for image topics.
+        chunk_index: Zero-based chunk index for image chunk topics.
+    """
+
     kind: IncomingTopicKind
     node_id: str
     request_id: str | None = None
@@ -73,6 +89,16 @@ _INCOMING_PATTERNS: tuple[tuple[re.Pattern[str], IncomingTopicKind], ...] = (
 
 
 def parse_incoming_topic(topic: str) -> IncomingTopic | None:
+    """Parse an ESP32 topic into a structured topic object.
+
+    Args:
+        topic: Raw MQTT topic string.
+
+    Returns:
+        Parsed topic metadata, or `None` when the topic is not part of the
+        Vision-Hub ESP32 contract.
+    """
+
     for pattern, kind in _INCOMING_PATTERNS:
         match = pattern.match(topic)
         if match is None:
@@ -92,20 +118,70 @@ def parse_incoming_topic(topic: str) -> IncomingTopic | None:
 
 
 def build_node_command_topic(node_id: str, command: CommandName | str) -> str:
+    """Build a node-specific command topic.
+
+    Args:
+        node_id: Target ESP32 node identifier.
+        command: Command name to send.
+
+    Returns:
+        MQTT topic for the targeted command.
+
+    Raises:
+        TopicError: If `node_id` or `command` is invalid.
+    """
+
     node = _safe_segment(node_id, "node_id")
     command_name = _command_value(command)
     return NODE_COMMAND.format(node_id=node, command=command_name)
 
 
 def build_broadcast_command_topic(command: CommandName | str) -> str:
+    """Build a broadcast command topic.
+
+    Args:
+        command: Command name to broadcast.
+
+    Returns:
+        MQTT topic for the broadcast command.
+
+    Raises:
+        TopicError: If `command` is not supported.
+    """
+
     return BROADCAST_COMMAND.format(command=_command_value(command))
 
 
 def validate_topic_segment(value: str, name: str) -> str:
+    """Validate that a value is safe for one MQTT topic segment.
+
+    Args:
+        value: Segment value to validate.
+        name: Human-readable field name for error messages.
+
+    Returns:
+        The original `value` when valid.
+
+    Raises:
+        TopicError: If the value is empty or contains unsafe characters.
+    """
+
     return _safe_segment(value, name)
 
 
 def _command_value(command: CommandName | str) -> str:
+    """Resolve a command enum or string into the MQTT command value.
+
+    Args:
+        command: Command enum or raw command string.
+
+    Returns:
+        Normalized command value.
+
+    Raises:
+        TopicError: If the command is not supported.
+    """
+
     try:
         return CommandName(command).value
     except ValueError as exc:
@@ -114,6 +190,19 @@ def _command_value(command: CommandName | str) -> str:
 
 
 def _safe_segment(value: str, name: str) -> str:
+    """Validate a string for use inside one MQTT topic path segment.
+
+    Args:
+        value: Candidate topic segment.
+        name: Human-readable field name for error messages.
+
+    Returns:
+        The original segment value.
+
+    Raises:
+        TopicError: If the segment is empty or contains unsafe characters.
+    """
+
     if not isinstance(value, str) or not value:
         raise TopicError(f"{name} must be a non-empty string")
     if not _SEGMENT_PATTERN.fullmatch(value):

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Export a YOLO model to NCNN and install it for Vision-Hub."""
+
 from __future__ import annotations
 
 import argparse
@@ -14,11 +16,27 @@ DEFAULT_OUTPUT_DIR = Path("models/person-detector/yolo11n-ncnn")
 
 @dataclass(frozen=True)
 class NcnnExportFiles:
+    """Resolved NCNN export file pair.
+
+    Attributes:
+        param_path: Path to the exported NCNN `.param` file.
+        bin_path: Path to the exported NCNN `.bin` file.
+    """
+
     param_path: Path
     bin_path: Path
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments.
+
+    Args:
+        argv: Optional argument list. When `None`, argparse reads `sys.argv`.
+
+    Returns:
+        Parsed command-line namespace.
+    """
+
     parser = argparse.ArgumentParser(
         description="Export a YOLO model to NCNN and install the artifacts in Vision-Hub's model directory.",
     )
@@ -48,6 +66,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the NCNN export and installation command.
+
+    Args:
+        argv: Optional argument list. When `None`, argparse reads `sys.argv`.
+
+    Returns:
+        Process exit code. `0` means success, `1` means failure.
+    """
+
     args = parse_args(argv)
     try:
         _assert_output_available(args.output_dir, force=args.force)
@@ -66,6 +93,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _load_ultralytics_yolo() -> Any:
+    """Import the Ultralytics YOLO class lazily.
+
+    Returns:
+        The `ultralytics.YOLO` class.
+
+    Raises:
+        RuntimeError: If Ultralytics is not installed in the current command
+            environment.
+    """
+
     try:
         from ultralytics import YOLO
     except ModuleNotFoundError as exc:
@@ -77,6 +114,21 @@ def _load_ultralytics_yolo() -> Any:
 
 
 def _export_to_ncnn(yolo_cls: Any, *, model: str, imgsz: int) -> Path:
+    """Export a YOLO model to NCNN with Ultralytics.
+
+    Args:
+        yolo_cls: Ultralytics `YOLO` class.
+        model: Model name or local `.pt` path.
+        imgsz: Export image size.
+
+    Returns:
+        Path to the Ultralytics NCNN export output.
+
+    Raises:
+        ValueError: If `imgsz` is not positive.
+        FileNotFoundError: If the export output cannot be found.
+    """
+
     if imgsz <= 0:
         raise ValueError("--imgsz must be > 0")
 
@@ -86,6 +138,19 @@ def _export_to_ncnn(yolo_cls: Any, *, model: str, imgsz: int) -> Path:
 
 
 def _resolve_export_path(export_result: Any, model: str) -> Path:
+    """Resolve the output directory returned or created by Ultralytics.
+
+    Args:
+        export_result: Value returned by `YOLO.export(...)`.
+        model: Model name or local `.pt` path used for fallback naming.
+
+    Returns:
+        Existing path containing the NCNN export.
+
+    Raises:
+        FileNotFoundError: If no candidate export path exists.
+    """
+
     candidates: list[Path] = []
 
     if isinstance(export_result, str | Path):
@@ -104,6 +169,19 @@ def _resolve_export_path(export_result: Any, model: str) -> Path:
 
 
 def _resolve_ncnn_files(path: Path) -> NcnnExportFiles:
+    """Find NCNN `.param` and `.bin` files in an export path.
+
+    Args:
+        path: Export directory or direct `.param` path.
+
+    Returns:
+        Resolved NCNN export file pair.
+
+    Raises:
+        ValueError: If the path is ambiguous or not a `.param` file.
+        FileNotFoundError: If the matching `.bin` file is missing.
+    """
+
     if path.is_file():
         if path.suffix != ".param":
             raise ValueError(f"expected a .param file or directory, got: {path}")
@@ -125,6 +203,18 @@ def _resolve_ncnn_files(path: Path) -> NcnnExportFiles:
 
 
 def _pair_from_param(param_path: Path) -> NcnnExportFiles:
+    """Resolve a `.param` file and its sibling `.bin` file.
+
+    Args:
+        param_path: Path to the NCNN `.param` file.
+
+    Returns:
+        Resolved NCNN export file pair.
+
+    Raises:
+        FileNotFoundError: If the sibling `.bin` file is missing.
+    """
+
     bin_path = param_path.with_suffix(".bin")
     if not bin_path.exists():
         raise FileNotFoundError(f"missing NCNN .bin file beside {param_path}")
@@ -132,6 +222,21 @@ def _pair_from_param(param_path: Path) -> NcnnExportFiles:
 
 
 def _install_ncnn_files(files: NcnnExportFiles, output_dir: Path, *, force: bool) -> NcnnExportFiles:
+    """Copy NCNN artifacts into Vision-Hub's stable model directory.
+
+    Args:
+        files: Exported NCNN files to install.
+        output_dir: Destination directory used by the Vision-Hub runtime.
+        force: Whether existing destination files may be overwritten.
+
+    Returns:
+        Installed NCNN file paths.
+
+    Raises:
+        FileExistsError: If destination files already exist and `force` is
+            false.
+    """
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     target_param = output_dir / "model.ncnn.param"
@@ -146,6 +251,17 @@ def _install_ncnn_files(files: NcnnExportFiles, output_dir: Path, *, force: bool
 
 
 def _assert_output_available(output_dir: Path, *, force: bool) -> None:
+    """Fail early when destination model files already exist.
+
+    Args:
+        output_dir: Destination directory used by the Vision-Hub runtime.
+        force: Whether existing destination files may be overwritten.
+
+    Raises:
+        FileExistsError: If destination files already exist and `force` is
+            false.
+    """
+
     if force:
         return
 

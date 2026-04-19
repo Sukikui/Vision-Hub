@@ -1,3 +1,5 @@
+"""Tests for MQTT message parsing and command payload builders."""
+
 import json
 import unittest
 
@@ -16,7 +18,11 @@ from vision_hub.mqtt.messages import (
 
 
 class MqttMessageTest(unittest.TestCase):
+    """Unit tests for MQTT payload models and builders."""
+
     def test_parse_heartbeat(self) -> None:
+        """Parse heartbeat JSON payloads into typed messages."""
+
         payload = b'{"node_id":"p4-001","ip":"192.168.50.20","uptime_s":1234}'
 
         message = parse_incoming_message("vision/nodes/p4-001/status/heartbeat", payload)
@@ -24,12 +30,16 @@ class MqttMessageTest(unittest.TestCase):
         self.assertEqual(message, NodeHeartbeatMessage(node_id="p4-001", ip="192.168.50.20", uptime_s=1234))
 
     def test_rejects_topic_payload_node_mismatch(self) -> None:
+        """Reject messages whose payload node id does not match the topic."""
+
         payload = b'{"node_id":"p4-002","ip":"192.168.50.20","uptime_s":1234}'
 
         with self.assertRaises(PayloadError):
             parse_incoming_message("vision/nodes/p4-001/status/heartbeat", payload)
 
     def test_parse_image_meta(self) -> None:
+        """Parse image metadata payloads from capture topics."""
+
         payload = b'{"capture_id":"cap-001","content_type":"image/jpeg","total_size":48123,"chunk_size":2048,"chunk_count":24}'
 
         message = parse_incoming_message("vision/nodes/p4-001/image/cap-001/meta", payload)
@@ -47,11 +57,15 @@ class MqttMessageTest(unittest.TestCase):
         )
 
     def test_parse_image_chunk_keeps_binary_payload(self) -> None:
+        """Keep image chunk payloads as raw bytes."""
+
         message = parse_incoming_message("vision/nodes/p4-001/image/cap-001/chunk/0", b"\xff\xd8\xff")
 
         self.assertEqual(message, ImageChunkMessage(node_id="p4-001", capture_id="cap-001", index=0, data=b"\xff\xd8\xff"))
 
     def test_parse_reply_validates_node_id(self) -> None:
+        """Parse command replies and preserve the full JSON body."""
+
         payload = b'{"node_id":"p4-001","ok":true,"uptime_s":123}'
 
         message = parse_incoming_message("vision/nodes/p4-001/reply/req-42", payload)
@@ -66,12 +80,16 @@ class MqttMessageTest(unittest.TestCase):
         )
 
     def test_rejects_reply_node_mismatch(self) -> None:
+        """Reject replies whose payload node id does not match the topic."""
+
         payload = b'{"node_id":"p4-002","ok":true}'
 
         with self.assertRaises(PayloadError):
             parse_incoming_message("vision/nodes/p4-001/reply/req-42", payload)
 
     def test_build_capture_command(self) -> None:
+        """Build capture commands with request ids and default MQTT flags."""
+
         command = build_capture_command("p4-001", "req-45")
 
         self.assertEqual(command.topic, "vision/nodes/p4-001/cmd/capture")
@@ -80,6 +98,8 @@ class MqttMessageTest(unittest.TestCase):
         self.assertFalse(command.retain)
 
     def test_build_config_command_validates_runtime_ranges(self) -> None:
+        """Build config commands and validate runtime field ranges."""
+
         patch = NodeRuntimeConfigPatch(heartbeat_interval_s=30, motion_cooldown_ms=5000, ir_illuminator_mode="capture")
 
         command = build_config_command("p4-001", "req-43", patch)
@@ -96,12 +116,16 @@ class MqttMessageTest(unittest.TestCase):
         )
 
     def test_rejects_invalid_config_patch(self) -> None:
+        """Reject invalid runtime configuration patches."""
+
         patch = NodeRuntimeConfigPatch(heartbeat_interval_s=0)
 
         with self.assertRaises(PayloadError):
             build_config_command("p4-001", "req-43", patch)
 
     def test_build_broadcast_config_command(self) -> None:
+        """Build broadcast runtime configuration commands."""
+
         patch = NodeRuntimeConfigPatch(motion_detection_enabled=True)
 
         command = build_broadcast_config_command("req-99", patch)

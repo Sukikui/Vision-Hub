@@ -1,3 +1,5 @@
+"""Tests for NCNN YOLO11 person detection helpers."""
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +17,11 @@ from vision_hub.inference.ncnn_yolo import (
 
 
 class NcnnYoloTest(unittest.TestCase):
+    """Unit tests for NCNN YOLO model resolution and post-processing."""
+
     def test_resolves_ultralytics_ncnn_model_directory(self) -> None:
+        """Resolve Ultralytics-style NCNN export directories."""
+
         with tempfile.TemporaryDirectory() as temp_dir:
             model_dir = Path(temp_dir)
             param_path = model_dir / "model.ncnn.param"
@@ -29,6 +35,8 @@ class NcnnYoloTest(unittest.TestCase):
             self.assertEqual(files.bin_path, bin_path)
 
     def test_output_rows_accepts_transposed_yolo_shape(self) -> None:
+        """Normalize transposed YOLO output into row-major shape."""
+
         output = np.zeros((144, 8400), dtype=np.float32)
 
         rows = _as_yolo11_rows(output)
@@ -36,6 +44,8 @@ class NcnnYoloTest(unittest.TestCase):
         self.assertEqual(rows.shape, (8400, 144))
 
     def test_decodes_person_detection_only(self) -> None:
+        """Decode only the COCO person class from YOLO rows."""
+
         rows = np.full((8400, 144), -12.0, dtype=np.float32)
         row = rows[0]
         row[0:64] = 0.0
@@ -59,6 +69,8 @@ class NcnnYoloTest(unittest.TestCase):
         self.assertGreater(detections[0].score, 0.99)
 
     def test_rejects_unexpected_yolo_row_count(self) -> None:
+        """Reject YOLO outputs whose row count does not match input geometry."""
+
         rows = np.zeros((8399, 144), dtype=np.float32)
 
         with self.assertRaises(ValueError):
@@ -76,6 +88,8 @@ class NcnnYoloTest(unittest.TestCase):
             )
 
     def test_nms_keeps_best_overlapping_detection(self) -> None:
+        """Keep the strongest overlapping detection after NMS."""
+
         detections = [
             Detection("person", 0, 0.9, 10, 10, 100, 100),
             Detection("person", 0, 0.8, 20, 20, 100, 100),
@@ -87,6 +101,8 @@ class NcnnYoloTest(unittest.TestCase):
         self.assertEqual([detection.score for detection in picked], [0.9, 0.7])
 
     def test_person_detection_result_exposes_person_count(self) -> None:
+        """Serialize the person count in detection results."""
+
         result = PersonDetectionResult(
             person_detected=True,
             person_count=2,

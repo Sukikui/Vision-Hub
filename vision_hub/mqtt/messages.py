@@ -1,3 +1,5 @@
+"""MQTT payload models and builders for the ESP32 Vision Node contract."""
+
 from __future__ import annotations
 
 import json
@@ -21,6 +23,8 @@ class PayloadError(ValueError):
 
 
 class NodeStatus(StrEnum):
+    """Presence states published on node online/offline topics."""
+
     ONLINE = "online"
     OFFLINE = "offline"
 
@@ -30,12 +34,27 @@ JsonObject: TypeAlias = dict[str, Any]
 
 @dataclass(frozen=True)
 class NodePresenceMessage:
+    """Node presence payload parsed from `status/online`.
+
+    Attributes:
+        node_id: ESP32 node identifier.
+        state: Online or offline state.
+    """
+
     node_id: str
     state: NodeStatus
 
 
 @dataclass(frozen=True)
 class NodeHeartbeatMessage:
+    """Heartbeat payload parsed from `status/heartbeat`.
+
+    Attributes:
+        node_id: ESP32 node identifier.
+        ip: Current IPv4 address reported by the node.
+        uptime_s: Node uptime in seconds.
+    """
+
     node_id: str
     ip: str
     uptime_s: int
@@ -43,6 +62,14 @@ class NodeHeartbeatMessage:
 
 @dataclass(frozen=True)
 class NodeEventMessage:
+    """Application event payload parsed from `event`.
+
+    Attributes:
+        node_id: ESP32 node identifier.
+        event: Event name emitted by the node.
+        timestamp_ms: Event timestamp in milliseconds from the node.
+    """
+
     node_id: str
     event: str
     timestamp_ms: int
@@ -50,6 +77,14 @@ class NodeEventMessage:
 
 @dataclass(frozen=True)
 class NodeReplyMessage:
+    """Command reply payload parsed from `reply/{request_id}`.
+
+    Attributes:
+        node_id: ESP32 node identifier.
+        request_id: Request id from the reply topic.
+        payload: Full JSON reply body.
+    """
+
     node_id: str
     request_id: str
     payload: JsonObject
@@ -57,6 +92,17 @@ class NodeReplyMessage:
 
 @dataclass(frozen=True)
 class ImageMetaMessage:
+    """Image metadata payload parsed from `image/{capture_id}/meta`.
+
+    Attributes:
+        node_id: ESP32 node identifier.
+        capture_id: Capture identifier.
+        content_type: MIME content type of the image payload.
+        total_size: Total image size in bytes.
+        chunk_size: Nominal chunk size in bytes.
+        chunk_count: Number of chunks expected for the image.
+    """
+
     node_id: str
     capture_id: str
     content_type: str
@@ -67,6 +113,15 @@ class ImageMetaMessage:
 
 @dataclass(frozen=True)
 class ImageChunkMessage:
+    """Binary image chunk parsed from `image/{capture_id}/chunk/{index}`.
+
+    Attributes:
+        node_id: ESP32 node identifier.
+        capture_id: Capture identifier.
+        index: Chunk index from the topic.
+        data: Raw binary chunk payload.
+    """
+
     node_id: str
     capture_id: str
     index: int
@@ -75,6 +130,15 @@ class ImageChunkMessage:
 
 @dataclass(frozen=True)
 class ImageDoneMessage:
+    """Image completion payload parsed from `image/{capture_id}/done`.
+
+    Attributes:
+        node_id: ESP32 node identifier.
+        capture_id: Capture identifier.
+        chunk_count: Number of chunks sent by the node.
+        ok: Whether the node considers the transfer complete and valid.
+    """
+
     node_id: str
     capture_id: str
     chunk_count: int
@@ -94,6 +158,15 @@ IncomingMqttMessage: TypeAlias = (
 
 @dataclass(frozen=True)
 class OutgoingCommand:
+    """MQTT command ready to be published to an ESP32 node.
+
+    Attributes:
+        topic: MQTT topic to publish on.
+        payload: UTF-8 encoded JSON command payload.
+        qos: MQTT QoS level.
+        retain: Whether the broker should retain the message.
+    """
+
     topic: str
     payload: bytes
     qos: int = 1
@@ -101,11 +174,27 @@ class OutgoingCommand:
 
     @property
     def payload_text(self) -> str:
+        """Decode the command payload as UTF-8 text.
+
+        Returns:
+            JSON payload string.
+        """
+
         return self.payload.decode("utf-8")
 
 
 @dataclass(frozen=True)
 class NodeRuntimeConfigPatch:
+    """Partial runtime configuration update for an ESP32 node.
+
+    Attributes:
+        heartbeat_interval_s: Optional heartbeat interval in seconds.
+        motion_detection_enabled: Optional PIR motion enable flag.
+        motion_warmup_ms: Optional PIR warm-up duration in milliseconds.
+        motion_cooldown_ms: Optional PIR cooldown duration in milliseconds.
+        ir_illuminator_mode: Optional IR illuminator mode.
+    """
+
     heartbeat_interval_s: int | None = None
     motion_detection_enabled: bool | None = None
     motion_warmup_ms: int | None = None
@@ -113,6 +202,15 @@ class NodeRuntimeConfigPatch:
     ir_illuminator_mode: str | None = None
 
     def to_payload(self) -> JsonObject:
+        """Convert the patch into a validated MQTT JSON object.
+
+        Returns:
+            JSON object containing only fields that are present in the patch.
+
+        Raises:
+            PayloadError: If a field value is outside the firmware contract.
+        """
+
         payload: JsonObject = {}
         if self.heartbeat_interval_s is not None:
             payload["heartbeat_interval_s"] = _bounded_int(self.heartbeat_interval_s, "heartbeat_interval_s", minimum=1, maximum=3600)
@@ -132,6 +230,20 @@ class NodeRuntimeConfigPatch:
 
 
 def parse_incoming_message(topic: str, payload: bytes) -> IncomingMqttMessage:
+    """Parse and validate one incoming MQTT message.
+
+    Args:
+        topic: MQTT topic on which the message was received.
+        payload: Raw MQTT payload bytes.
+
+    Returns:
+        Typed message object matching the topic kind.
+
+    Raises:
+        PayloadError: If the topic is unsupported or the payload violates the
+            ESP32 firmware contract.
+    """
+
     parsed_topic = parse_incoming_topic(topic)
     if parsed_topic is None:
         raise PayloadError(f"unsupported MQTT topic: {topic}")
@@ -217,18 +329,62 @@ def parse_incoming_message(topic: str, payload: bytes) -> IncomingMqttMessage:
 
 
 def build_ping_command(node_id: str, request_id: str) -> OutgoingCommand:
+    """Build a targeted ping command.
+
+    Args:
+        node_id: Target ESP32 node identifier.
+        request_id: Request id used to correlate the reply.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_node_request_command(node_id, CommandName.PING, request_id)
 
 
 def build_capture_command(node_id: str, request_id: str) -> OutgoingCommand:
+    """Build a targeted image capture command.
+
+    Args:
+        node_id: Target ESP32 node identifier.
+        request_id: Request id used to correlate the reply.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_node_request_command(node_id, CommandName.CAPTURE, request_id)
 
 
 def build_reboot_command(node_id: str, request_id: str) -> OutgoingCommand:
+    """Build a targeted reboot command.
+
+    Args:
+        node_id: Target ESP32 node identifier.
+        request_id: Request id used to correlate the reply.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_node_request_command(node_id, CommandName.REBOOT, request_id)
 
 
 def build_config_command(node_id: str, request_id: str, patch: NodeRuntimeConfigPatch) -> OutgoingCommand:
+    """Build a targeted runtime configuration command.
+
+    Args:
+        node_id: Target ESP32 node identifier.
+        request_id: Request id used to correlate the reply.
+        patch: Runtime configuration values to update.
+
+    Returns:
+        MQTT command object ready to publish.
+
+    Raises:
+        PayloadError: If the patch or request id is invalid.
+    """
+
     payload = patch.to_payload()
     payload["request_id"] = _required_topic_id(request_id, "request_id")
     return OutgoingCommand(
@@ -238,18 +394,58 @@ def build_config_command(node_id: str, request_id: str, patch: NodeRuntimeConfig
 
 
 def build_broadcast_ping_command(request_id: str) -> OutgoingCommand:
+    """Build a broadcast ping command.
+
+    Args:
+        request_id: Request id used to correlate node replies.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_broadcast_request_command(CommandName.PING, request_id)
 
 
 def build_broadcast_capture_command(request_id: str) -> OutgoingCommand:
+    """Build a broadcast capture command.
+
+    Args:
+        request_id: Request id used to correlate node replies.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_broadcast_request_command(CommandName.CAPTURE, request_id)
 
 
 def build_broadcast_reboot_command(request_id: str) -> OutgoingCommand:
+    """Build a broadcast reboot command.
+
+    Args:
+        request_id: Request id used to correlate node replies.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_broadcast_request_command(CommandName.REBOOT, request_id)
 
 
 def build_broadcast_config_command(request_id: str, patch: NodeRuntimeConfigPatch) -> OutgoingCommand:
+    """Build a broadcast runtime configuration command.
+
+    Args:
+        request_id: Request id used to correlate node replies.
+        patch: Runtime configuration values to update.
+
+    Returns:
+        MQTT command object ready to publish.
+
+    Raises:
+        PayloadError: If the patch or request id is invalid.
+    """
+
     payload = patch.to_payload()
     payload["request_id"] = _required_topic_id(request_id, "request_id")
     return OutgoingCommand(
@@ -259,14 +455,48 @@ def build_broadcast_config_command(request_id: str, patch: NodeRuntimeConfigPatc
 
 
 def _build_node_request_command(node_id: str, command: CommandName, request_id: str) -> OutgoingCommand:
+    """Build a targeted request-style command payload.
+
+    Args:
+        node_id: Target ESP32 node identifier.
+        command: Command enum to publish.
+        request_id: Request id used to correlate the reply.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_request_command(build_node_command_topic(node_id, command), request_id)
 
 
 def _build_broadcast_request_command(command: CommandName, request_id: str) -> OutgoingCommand:
+    """Build a broadcast request-style command payload.
+
+    Args:
+        command: Command enum to publish.
+        request_id: Request id used to correlate replies.
+
+    Returns:
+        MQTT command object ready to publish.
+    """
+
     return _build_request_command(build_broadcast_command_topic(command), request_id)
 
 
 def _build_request_command(topic: str, request_id: str) -> OutgoingCommand:
+    """Build a command whose payload only contains `request_id`.
+
+    Args:
+        topic: MQTT topic to publish on.
+        request_id: Request id used to correlate replies.
+
+    Returns:
+        MQTT command object ready to publish.
+
+    Raises:
+        PayloadError: If `request_id` is not safe for the firmware contract.
+    """
+
     return OutgoingCommand(
         topic=topic,
         payload=_encode_json({"request_id": _required_topic_id(request_id, "request_id")}),
@@ -274,6 +504,18 @@ def _build_request_command(topic: str, request_id: str) -> OutgoingCommand:
 
 
 def _json_object(payload: bytes) -> JsonObject:
+    """Decode a UTF-8 JSON object payload.
+
+    Args:
+        payload: Raw MQTT payload bytes.
+
+    Returns:
+        Decoded JSON object.
+
+    Raises:
+        PayloadError: If the payload is not UTF-8, not JSON, or not an object.
+    """
+
     try:
         decoded = json.loads(payload.decode("utf-8"))
     except UnicodeDecodeError as exc:
@@ -287,10 +529,32 @@ def _json_object(payload: bytes) -> JsonObject:
 
 
 def _encode_json(payload: JsonObject) -> bytes:
+    """Encode a JSON object using the compact firmware command format.
+
+    Args:
+        payload: JSON object to encode.
+
+    Returns:
+        UTF-8 JSON bytes with deterministic key order.
+    """
+
     return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
 def _required_str(payload: JsonObject, name: str) -> str:
+    """Read a required non-empty string from a JSON object.
+
+    Args:
+        payload: JSON object to read from.
+        name: Field name to read.
+
+    Returns:
+        Field value.
+
+    Raises:
+        PayloadError: If the field is missing or not a non-empty string.
+    """
+
     value = payload.get(name)
     if not isinstance(value, str) or not value:
         raise PayloadError(f"{name} must be a non-empty string")
@@ -298,6 +562,19 @@ def _required_str(payload: JsonObject, name: str) -> str:
 
 
 def _required_topic_id(value: str, name: str) -> str:
+    """Validate a payload id that is also used inside an MQTT topic.
+
+    Args:
+        value: Candidate identifier.
+        name: Human-readable field name for error messages.
+
+    Returns:
+        Validated identifier.
+
+    Raises:
+        PayloadError: If the value is not a safe topic segment.
+    """
+
     try:
         return validate_topic_segment(value, name)
     except TopicError as exc:
@@ -305,6 +582,19 @@ def _required_topic_id(value: str, name: str) -> str:
 
 
 def _required_int(payload: JsonObject, name: str) -> int:
+    """Read a required integer from a JSON object.
+
+    Args:
+        payload: JSON object to read from.
+        name: Field name to read.
+
+    Returns:
+        Field value.
+
+    Raises:
+        PayloadError: If the field is missing, boolean, or not an integer.
+    """
+
     value = payload.get(name)
     if isinstance(value, bool) or not isinstance(value, int):
         raise PayloadError(f"{name} must be an integer")
@@ -312,6 +602,19 @@ def _required_int(payload: JsonObject, name: str) -> int:
 
 
 def _required_bool(payload: JsonObject, name: str) -> bool:
+    """Read a required boolean from a JSON object.
+
+    Args:
+        payload: JSON object to read from.
+        name: Field name to read.
+
+    Returns:
+        Field value.
+
+    Raises:
+        PayloadError: If the field is missing or not a boolean.
+    """
+
     value = payload.get(name)
     if not isinstance(value, bool):
         raise PayloadError(f"{name} must be a boolean")
@@ -319,6 +622,21 @@ def _required_bool(payload: JsonObject, name: str) -> bool:
 
 
 def _bounded_int(value: int, name: str, *, minimum: int, maximum: int | None = None) -> int:
+    """Validate that an integer is within an inclusive range.
+
+    Args:
+        value: Candidate integer value.
+        name: Human-readable field name for error messages.
+        minimum: Inclusive lower bound.
+        maximum: Optional inclusive upper bound.
+
+    Returns:
+        The original integer value.
+
+    Raises:
+        PayloadError: If the value is not an integer or is outside the range.
+    """
+
     if isinstance(value, bool) or not isinstance(value, int):
         raise PayloadError(f"{name} must be an integer")
     if value < minimum:
@@ -329,5 +647,16 @@ def _bounded_int(value: int, name: str, *, minimum: int, maximum: int | None = N
 
 
 def _require_topic_match(topic_value: str, payload_value: str, name: str) -> None:
+    """Require an identifier in the payload to match the MQTT topic.
+
+    Args:
+        topic_value: Identifier extracted from the MQTT topic.
+        payload_value: Identifier extracted from the JSON payload.
+        name: Human-readable field name for error messages.
+
+    Raises:
+        PayloadError: If both values differ.
+    """
+
     if topic_value != payload_value:
         raise PayloadError(f"{name} in payload does not match MQTT topic")

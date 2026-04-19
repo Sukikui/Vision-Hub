@@ -1,10 +1,16 @@
+"""Tests for MQTT topic parsing and construction."""
+
 import unittest
 
 from vision_hub.mqtt.topics import CommandName, IncomingTopicKind, TopicError, build_node_command_topic, parse_incoming_topic
 
 
 class MqttTopicTest(unittest.TestCase):
+    """Unit tests for MQTT topic helpers."""
+
     def test_parse_image_chunk_topic(self) -> None:
+        """Parse image chunk topics into structured metadata."""
+
         topic = parse_incoming_topic("vision/nodes/p4-001/image/cap-42/chunk/7")
 
         self.assertIsNotNone(topic)
@@ -15,12 +21,16 @@ class MqttTopicTest(unittest.TestCase):
         self.assertEqual(topic.chunk_index, 7)
 
     def test_builds_node_command_topic(self) -> None:
+        """Build node command topics with supported command names."""
+
         self.assertEqual(
             build_node_command_topic("p4-001", CommandName.CAPTURE),
             "vision/nodes/p4-001/cmd/capture",
         )
 
     def test_rejects_unknown_command(self) -> None:
+        """Reject unsupported command names while building command topics."""
+
         with self.assertRaises(TopicError):
             build_node_command_topic("p4-001", "flash")
 
