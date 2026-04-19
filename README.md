@@ -67,7 +67,13 @@ uv sync
 
 Raspberry Pi field Ethernet and admin Wi-Fi configuration is stored in [`deploy/vision-hub-network.env`](deploy/vision-hub-network.env).
 
-Change `ADMIN_WIFI_PASSWORD` before running the script on a real Raspberry Pi.
+Before running the script on a real Raspberry Pi, replace the committed admin Wi-Fi placeholder:
+
+```env
+ADMIN_WIFI_PASSWORD=change-this-admin-password
+```
+
+with a private WPA password of 8 to 63 characters. The script refuses to configure the admin access point while the placeholder is still present.
 
 ```bash
 sudo deploy/rpi/configure-network-interfaces.sh
