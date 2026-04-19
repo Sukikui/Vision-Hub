@@ -77,6 +77,48 @@ Supported file layouts:
 | model directory | exactly one `*.param` file with a matching `*.bin` |
 | direct `.param` path | matching `.bin` beside it |
 
+## Model Export Tool
+
+Vision-Hub stores the export helper in:
+
+```text
+tools/export_yolo_ncnn.py
+```
+
+This tool is not part of the long-running hub service. It is used during system provisioning to create the NCNN model files expected by the runtime.
+
+Default command:
+
+```bash
+uv run --with ultralytics python tools/export_yolo_ncnn.py \
+  --model yolo11n.pt \
+  --output-dir models/person-detector/yolo11n-ncnn
+```
+
+Production command for the Raspberry Pi model directory:
+
+```bash
+uv run --with ultralytics python tools/export_yolo_ncnn.py \
+  --model yolo11n.pt \
+  --output-dir /opt/vision-hub/models/person-detector/yolo11n-ncnn
+```
+
+Use `--force` to replace existing `model.ncnn.param` and `model.ncnn.bin` files.
+
+The tool performs this sequence:
+
+| Step | Operation |
+| --- | --- |
+| 1 | load `yolo11n.pt` through Ultralytics |
+| 2 | export the model with `format="ncnn"` and `imgsz=640` |
+| 3 | locate the generated `.param` and `.bin` files |
+| 4 | copy them as `model.ncnn.param` and `model.ncnn.bin` |
+| 5 | leave the runtime model directory ready for `NcnnYolo11PersonDetector` |
+
+Ultralytics controls the raw export directory name, typically `yolo11n_ncnn_model/`. Vision-Hub copies the generated artifacts into a stable runtime path so the service always loads the same file names from the same directory.
+
+`ultralytics` is installed only for the export command through `uv --with ultralytics`. It is not declared as a Vision-Hub runtime dependency.
+
 ## Model Import Flow
 
 In Vision-Hub, "importing the model" means loading NCNN artifacts from disk. The `.param` and `.bin` files are not imported with Python's `import` mechanism.
