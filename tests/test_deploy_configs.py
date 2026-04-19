@@ -13,7 +13,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RPI_INTERFACE_SCRIPT = ROOT / "deploy" / "rpi" / "configure-field-interface.sh"
+RPI_NETWORK_SCRIPT = ROOT / "deploy" / "rpi" / "configure-network-interfaces.sh"
 DOCKER_RENDER_SCRIPT = ROOT / "deploy" / "docker" / "render-configs.sh"
 DOCKER_INSTALL_SCRIPT = ROOT / "deploy" / "docker" / "install-rpi.sh"
 COMPOSE_FILE = ROOT / "compose.yaml"
@@ -26,7 +26,7 @@ class DeployConfigTest(unittest.TestCase):
         """Validate deployment scripts with bash syntax checking."""
 
         for script in (
-            RPI_INTERFACE_SCRIPT,
+            RPI_NETWORK_SCRIPT,
             DOCKER_RENDER_SCRIPT,
             DOCKER_INSTALL_SCRIPT,
         ):
@@ -57,6 +57,12 @@ class DeployConfigTest(unittest.TestCase):
                         "FIELD_DHCP_RANGE_END=192.168.60.99",
                         "FIELD_DHCP_NETMASK=255.255.255.0",
                         "FIELD_DHCP_LEASE_TIME=12h",
+                        "ADMIN_INTERFACE=wlp2s0",
+                        "ADMIN_ADDRESS=192.168.70.1/24",
+                        "ADMIN_DHCP_RANGE_START=192.168.70.20",
+                        "ADMIN_DHCP_RANGE_END=192.168.70.80",
+                        "ADMIN_DHCP_NETMASK=255.255.255.0",
+                        "ADMIN_DHCP_LEASE_TIME=6h",
                         "MQTT_LISTENER_ADDRESS=192.168.60.1",
                         "MQTT_PORT=1884",
                     )
@@ -69,14 +75,22 @@ class DeployConfigTest(unittest.TestCase):
                 env_file=env_path,
                 env={"GENERATED_DIR": str(generated_dir)},
             )
-            dnsmasq_config = (generated_dir / "dnsmasq" / "vision-hub.conf").read_text(encoding="utf-8")
+            field_dnsmasq_config = (generated_dir / "dnsmasq-field" / "vision-hub.conf").read_text(
+                encoding="utf-8"
+            )
+            admin_dnsmasq_config = (generated_dir / "dnsmasq-admin" / "vision-hub.conf").read_text(
+                encoding="utf-8"
+            )
             mosquitto_config = (generated_dir / "mosquitto" / "vision-hub.conf").read_text(encoding="utf-8")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("interface=enp1s0", dnsmasq_config)
-        self.assertIn("dhcp-range=192.168.60.20,192.168.60.99,255.255.255.0,12h", dnsmasq_config)
-        self.assertIn("dhcp-option=option:router,192.168.60.1", dnsmasq_config)
-        self.assertIn("mqtt://192.168.60.1:1884", dnsmasq_config)
+        self.assertIn("interface=enp1s0", field_dnsmasq_config)
+        self.assertIn("dhcp-range=192.168.60.20,192.168.60.99,255.255.255.0,12h", field_dnsmasq_config)
+        self.assertIn("dhcp-option=option:router,192.168.60.1", field_dnsmasq_config)
+        self.assertIn("mqtt://192.168.60.1:1884", field_dnsmasq_config)
+        self.assertIn("interface=wlp2s0", admin_dnsmasq_config)
+        self.assertIn("dhcp-range=192.168.70.20,192.168.70.80,255.255.255.0,6h", admin_dnsmasq_config)
+        self.assertNotIn("dhcp-option=option:router", admin_dnsmasq_config)
         self.assertIn("listener 1884 192.168.60.1", mosquitto_config)
 
     def test_docker_render_rejects_gateway_that_does_not_match_field_address(self) -> None:
@@ -94,6 +108,12 @@ class DeployConfigTest(unittest.TestCase):
                         "FIELD_DHCP_RANGE_END=192.168.50.200",
                         "FIELD_DHCP_NETMASK=255.255.255.0",
                         "FIELD_DHCP_LEASE_TIME=24h",
+                        "ADMIN_INTERFACE=wlan0",
+                        "ADMIN_ADDRESS=192.168.60.1/24",
+                        "ADMIN_DHCP_RANGE_START=192.168.60.20",
+                        "ADMIN_DHCP_RANGE_END=192.168.60.100",
+                        "ADMIN_DHCP_NETMASK=255.255.255.0",
+                        "ADMIN_DHCP_LEASE_TIME=12h",
                         "MQTT_LISTENER_ADDRESS=0.0.0.0",
                         "MQTT_PORT=1883",
                     )
@@ -106,6 +126,47 @@ class DeployConfigTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("FIELD_GATEWAY must match", result.stderr)
 
+    def test_docker_render_rejects_reused_network_interface(self) -> None:
+        """Reject configs that bind field and admin DHCP to the same interface."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / "bad.env"
+            env_path.write_text(
+                "\n".join(
+                    (
+                        "FIELD_INTERFACE=eth0",
+                        "FIELD_ADDRESS=192.168.50.1/24",
+                        "FIELD_GATEWAY=192.168.50.1",
+                        "FIELD_DHCP_RANGE_START=192.168.50.20",
+                        "FIELD_DHCP_RANGE_END=192.168.50.200",
+                        "FIELD_DHCP_NETMASK=255.255.255.0",
+                        "FIELD_DHCP_LEASE_TIME=24h",
+                        "ADMIN_INTERFACE=eth0",
+                        "ADMIN_ADDRESS=192.168.60.1/24",
+                        "ADMIN_DHCP_RANGE_START=192.168.60.20",
+                        "ADMIN_DHCP_RANGE_END=192.168.60.100",
+                        "ADMIN_DHCP_NETMASK=255.255.255.0",
+                        "ADMIN_DHCP_LEASE_TIME=12h",
+                        "MQTT_LISTENER_ADDRESS=0.0.0.0",
+                        "MQTT_PORT=1883",
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            result = _run_script(DOCKER_RENDER_SCRIPT, env_file=env_path)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FIELD_INTERFACE and ADMIN_INTERFACE must be different", result.stderr)
+
+    def test_network_script_rejects_default_admin_wifi_password(self) -> None:
+        """Refuse the committed admin Wi-Fi placeholder before touching the host."""
+
+        result = _run_script(RPI_NETWORK_SCRIPT)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("change ADMIN_WIFI_PASSWORD", result.stderr)
+
     def test_docker_render_configs_uses_default_field_contract(self) -> None:
         """Render Docker-mounted service configs from the default env file."""
 
@@ -113,17 +174,26 @@ class DeployConfigTest(unittest.TestCase):
             generated_dir = Path(temp_dir) / "generated"
             result = _run_script(DOCKER_RENDER_SCRIPT, env={"GENERATED_DIR": str(generated_dir)})
 
-            dnsmasq_config = (generated_dir / "dnsmasq" / "vision-hub.conf").read_text(encoding="utf-8")
+            field_dnsmasq_config = (generated_dir / "dnsmasq-field" / "vision-hub.conf").read_text(
+                encoding="utf-8"
+            )
+            admin_dnsmasq_config = (generated_dir / "dnsmasq-admin" / "vision-hub.conf").read_text(
+                encoding="utf-8"
+            )
             mosquitto_config = (generated_dir / "mosquitto" / "vision-hub.conf").read_text(encoding="utf-8")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("interface=eth0", dnsmasq_config)
-        self.assertIn("dhcp-option=option:router,192.168.50.1", dnsmasq_config)
-        self.assertIn("mqtt://192.168.50.1:1883", dnsmasq_config)
+        self.assertIn("interface=eth0", field_dnsmasq_config)
+        self.assertIn("dhcp-option=option:router,192.168.50.1", field_dnsmasq_config)
+        self.assertIn("mqtt://192.168.50.1:1883", field_dnsmasq_config)
+        self.assertIn("interface=wlan0", admin_dnsmasq_config)
+        self.assertIn("dhcp-range=192.168.60.20,192.168.60.100,255.255.255.0,12h", admin_dnsmasq_config)
+        self.assertNotIn("dhcp-option=option:router", admin_dnsmasq_config)
         self.assertIn("listener 1883 0.0.0.0", mosquitto_config)
         self.assertIn("persistence_location /mosquitto/data/", mosquitto_config)
         self.assertIn("log_dest stdout", mosquitto_config)
-        self.assertNotIn("<", dnsmasq_config)
+        self.assertNotIn("<", field_dnsmasq_config)
+        self.assertNotIn("<", admin_dnsmasq_config)
         self.assertNotIn("<", mosquitto_config)
 
     def test_docker_systemd_render_points_to_compose_stack(self) -> None:
@@ -145,13 +215,16 @@ class DeployConfigTest(unittest.TestCase):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         services = compose["services"]
 
-        for service_name in ("dnsmasq", "mosquitto", "vision-hub"):
+        for service_name in ("dnsmasq-field", "dnsmasq-admin", "mosquitto", "vision-hub"):
             with self.subTest(service=service_name):
                 service = services[service_name]
                 self.assertEqual(service["network_mode"], "host")
                 self.assertEqual(service["restart"], "unless-stopped")
 
-        self.assertEqual(services["dnsmasq"]["cap_add"], ["NET_ADMIN", "NET_RAW"])
+        self.assertEqual(services["dnsmasq-field"]["cap_add"], ["NET_ADMIN", "NET_RAW"])
+        self.assertEqual(services["dnsmasq-admin"]["cap_add"], ["NET_ADMIN", "NET_RAW"])
+        self.assertIn("dnsmasq-field/vision-hub.conf", services["dnsmasq-field"]["volumes"][0])
+        self.assertIn("dnsmasq-admin/vision-hub.conf", services["dnsmasq-admin"]["volumes"][0])
         self.assertIn("eclipse-mosquitto:2", services["mosquitto"]["image"])
         self.assertEqual(services["vision-hub"]["environment"]["VISION_HUB_MQTT_HOST"], "127.0.0.1")
         self.assertIn("mosquitto-data", compose["volumes"])

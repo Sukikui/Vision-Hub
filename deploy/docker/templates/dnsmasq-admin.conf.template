@@ -1,0 +1,21 @@
+# Vision-Hub local admin Wi-Fi DHCP configuration.
+#
+# NetworkManager creates the Wi-Fi access point on <admin_interface>.
+# This dnsmasq instance only gives admin clients an IP address on that link.
+
+interface=<admin_interface>
+bind-interfaces
+
+# DHCP only. The admin Wi-Fi is for direct access to the Raspberry Pi services,
+# not for DNS forwarding.
+port=0
+
+dhcp-authoritative
+dhcp-range=<admin_start>,<admin_end>,<admin_netmask>,<admin_lease>
+
+# No DHCP router option is advertised on the admin Wi-Fi. A connected laptop can
+# reach <admin_address_ip> directly on-link without making the Raspberry Pi its
+# default internet gateway.
+
+# Uncomment during admin Wi-Fi debugging if lease logs are needed.
+# log-dhcp

@@ -13,7 +13,8 @@ Raspberry Pi boot
   -> systemd
     -> vision-hub-stack.service
       -> docker compose up -d --remove-orphans
-        -> dnsmasq container
+        -> dnsmasq-field container
+        -> dnsmasq-admin container
         -> mosquitto container
         -> vision-hub container
 ```
@@ -25,7 +26,9 @@ There is no separate `dnsmasq.service` or `mosquitto.service` in the Docker depl
 | Responsibility | Implementation |
 | --- | --- |
 | stable field address | NetworkManager profile on the field Ethernet interface |
-| DHCP for ESP32 nodes | dnsmasq container |
+| local admin Wi-Fi access point | NetworkManager Wi-Fi AP profile |
+| DHCP for ESP32 nodes | `dnsmasq-field` container |
+| DHCP for admin Wi-Fi clients | `dnsmasq-admin` container |
 | local MQTT broker | Mosquitto container |
 | hub application | Vision-Hub Python container |
 
@@ -33,20 +36,22 @@ There is no separate `dnsmasq.service` or `mosquitto.service` in the Docker depl
 
 | Path | Role |
 | --- | --- |
-| `deploy/vision-hub-field.env` | source of truth for field network values |
-| `deploy/rpi/configure-field-interface.sh` | creates or updates the Raspberry Pi Ethernet profile |
+| `deploy/vision-hub-network.env` | source of truth for field and admin network values |
+| `deploy/rpi/configure-network-interfaces.sh` | creates or updates the Raspberry Pi Ethernet and Wi-Fi AP profiles |
 | `deploy/docker/render-configs.sh` | renders Docker-mounted dnsmasq and Mosquitto configs |
 | `deploy/docker/install-rpi.sh` | installs and enables the `vision-hub-stack.service` systemd unit |
-| `compose.yaml` | defines the `dnsmasq`, `mosquitto`, and `vision-hub` containers |
+| `compose.yaml` | defines the `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, and `vision-hub` containers |
 
 The old non-Docker split is intentionally gone. dnsmasq and Mosquitto are not installed as independent host services; Compose starts them from `compose.yaml`.
 
+The admin Wi-Fi radio mode is the only part that stays host-side: NetworkManager creates the access point on `wlan0`. DHCP for clients connected to that access point is still served by the `dnsmasq-admin` container.
+
 ## Installation Order
 
-Configure the Raspberry Pi field interface once:
+Set a real admin Wi-Fi password in `deploy/vision-hub-network.env`, then configure the Raspberry Pi network interfaces once:
 
 ```bash
-sudo deploy/rpi/configure-field-interface.sh
+sudo deploy/rpi/configure-network-interfaces.sh
 ```
 
 Export the NCNN model before starting the service:
@@ -80,7 +85,8 @@ sudo deploy/docker/install-rpi.sh
 ip addr show eth0
 sudo systemctl status vision-hub-stack
 docker compose ps
-docker compose logs dnsmasq
+docker compose logs dnsmasq-field
+docker compose logs dnsmasq-admin
 docker compose logs mosquitto
 docker compose logs vision-hub
 ```
@@ -91,4 +97,12 @@ Expected ESP32 logs:
 ETHIP:192.168.50.xx
 ETHGW:192.168.50.1
 using DHCP gateway as MQTT broker: mqtt://192.168.50.1:1883
+```
+
+Expected admin client state:
+
+```text
+SSID: VisionHub-Admin
+client IP: 192.168.60.x
+RPi admin IP: 192.168.60.1
 ```

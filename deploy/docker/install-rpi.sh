@@ -106,7 +106,7 @@ fi
 # Step 5: render Docker-mounted service configs before enabling the stack.
 #
 # The systemd unit also renders them on each start, so changes in
-# deploy/vision-hub-field.env are picked up after reboot or service restart.
+# deploy/vision-hub-network.env are picked up after reboot or service restart.
 "${SCRIPT_DIR}/render-configs.sh"
 
 # Step 6: render the systemd unit to a temporary file, then install it atomically

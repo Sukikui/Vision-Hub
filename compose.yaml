@@ -1,20 +1,28 @@
 name: vision-hub
 
+x-dnsmasq-common: &dnsmasq-common
+  build:
+    context: .
+    dockerfile: deploy/docker/dnsmasq.Dockerfile
+  image: vision-hub-dnsmasq:local
+  network_mode: host
+  cap_add:
+    - NET_ADMIN
+    - NET_RAW
+  entrypoint: ["dnsmasq"]
+  command: ["--no-daemon", "--conf-file=/etc/dnsmasq.d/vision-hub.conf"]
+  restart: unless-stopped
+
 services:
-  dnsmasq:
-    build:
-      context: .
-      dockerfile: deploy/docker/dnsmasq.Dockerfile
-    image: vision-hub-dnsmasq:local
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
+  dnsmasq-field:
+    <<: *dnsmasq-common
     volumes:
-      - ./deploy/docker/generated/dnsmasq/vision-hub.conf:/etc/dnsmasq.d/vision-hub.conf:ro
-    entrypoint: ["dnsmasq"]
-    command: ["--no-daemon", "--conf-file=/etc/dnsmasq.d/vision-hub.conf"]
-    restart: unless-stopped
+      - ./deploy/docker/generated/dnsmasq-field/vision-hub.conf:/etc/dnsmasq.d/vision-hub.conf:ro
+
+  dnsmasq-admin:
+    <<: *dnsmasq-common
+    volumes:
+      - ./deploy/docker/generated/dnsmasq-admin/vision-hub.conf:/etc/dnsmasq.d/vision-hub.conf:ro
 
   mosquitto:
     image: eclipse-mosquitto:2

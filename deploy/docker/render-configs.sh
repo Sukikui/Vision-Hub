@@ -3,19 +3,21 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 DEPLOY_DIR="$(dirname "${SCRIPT_DIR}")"
-DEFAULT_ENV_FILE="${DEPLOY_DIR}/vision-hub-field.env"
+DEFAULT_ENV_FILE="${DEPLOY_DIR}/vision-hub-network.env"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 GENERATED_DIR="${GENERATED_DIR:-${SCRIPT_DIR}/generated}"
-DNSMASQ_TEMPLATE="${SCRIPT_DIR}/templates/dnsmasq.conf.template"
+FIELD_DNSMASQ_TEMPLATE="${SCRIPT_DIR}/templates/dnsmasq-field.conf.template"
+ADMIN_DNSMASQ_TEMPLATE="${SCRIPT_DIR}/templates/dnsmasq-admin.conf.template"
 MOSQUITTO_TEMPLATE="${SCRIPT_DIR}/templates/mosquitto.conf.template"
-DNSMASQ_TARGET="${GENERATED_DIR}/dnsmasq/vision-hub.conf"
+FIELD_DNSMASQ_TARGET="${GENERATED_DIR}/dnsmasq-field/vision-hub.conf"
+ADMIN_DNSMASQ_TARGET="${GENERATED_DIR}/dnsmasq-admin/vision-hub.conf"
 MOSQUITTO_TARGET="${GENERATED_DIR}/mosquitto/vision-hub.conf"
 
-# This script does not install anything. It turns the shared field-network env
-# file into concrete config files mounted by Docker Compose.
+# This script does not install anything. It turns the shared network env file
+# into concrete config files mounted by Docker Compose.
 #
 # Defaults:
-#   env source: deploy/vision-hub-field.env
+#   env source: deploy/vision-hub-network.env
 #   output dir: deploy/docker/generated/
 #
 # Tests and operators can override those paths with:
@@ -39,7 +41,7 @@ case "${1:-}" in
         ;;
 esac
 
-render_dnsmasq_config() {
+render_field_dnsmasq_config() {
     # Render DHCP config for the ESP32 field LAN. dnsmasq advertises
     # FIELD_GATEWAY as the DHCP router option, and the ESP32 firmware uses that
     # gateway IP as the MQTT broker host.
@@ -52,7 +54,22 @@ render_dnsmasq_config() {
         -e "s|<dhcp_netmask>|${FIELD_DHCP_NETMASK}|g" \
         -e "s|<dhcp_lease>|${FIELD_DHCP_LEASE_TIME}|g" \
         -e "s|<mqtt_port>|${MQTT_PORT}|g" \
-        "${DNSMASQ_TEMPLATE}"
+        "${FIELD_DNSMASQ_TEMPLATE}"
+}
+
+render_admin_dnsmasq_config() {
+    # Render DHCP config for the local admin Wi-Fi. This DHCP service does not
+    # advertise a router option, so a laptop can use the AP to reach the RPi
+    # without making it the default internet gateway.
+    sed \
+        -e "s|<admin_interface>|${ADMIN_INTERFACE}|g" \
+        -e "s|<admin_address>|${ADMIN_ADDRESS}|g" \
+        -e "s|<admin_address_ip>|${ADMIN_ADDRESS_IP}|g" \
+        -e "s|<admin_start>|${ADMIN_DHCP_RANGE_START}|g" \
+        -e "s|<admin_end>|${ADMIN_DHCP_RANGE_END}|g" \
+        -e "s|<admin_netmask>|${ADMIN_DHCP_NETMASK}|g" \
+        -e "s|<admin_lease>|${ADMIN_DHCP_LEASE_TIME}|g" \
+        "${ADMIN_DNSMASQ_TEMPLATE}"
 }
 
 render_mosquitto_config() {
@@ -78,8 +95,8 @@ validate_no_placeholders() {
     fi
 }
 
-# Step 1: load the shared field-network values used by the Raspberry Pi
-# interface script and the Docker-rendered service configs.
+# Step 1: load the shared network values used by the Raspberry Pi interface
+# script and the Docker-rendered service configs.
 if [ -f "${ENV_FILE}" ]; then
     # shellcheck disable=SC1090
     . "${ENV_FILE}"
@@ -96,6 +113,12 @@ FIELD_DHCP_RANGE_START="${FIELD_DHCP_RANGE_START:?FIELD_DHCP_RANGE_START is requ
 FIELD_DHCP_RANGE_END="${FIELD_DHCP_RANGE_END:?FIELD_DHCP_RANGE_END is required}"
 FIELD_DHCP_NETMASK="${FIELD_DHCP_NETMASK:?FIELD_DHCP_NETMASK is required}"
 FIELD_DHCP_LEASE_TIME="${FIELD_DHCP_LEASE_TIME:?FIELD_DHCP_LEASE_TIME is required}"
+ADMIN_INTERFACE="${ADMIN_INTERFACE:?ADMIN_INTERFACE is required}"
+ADMIN_ADDRESS="${ADMIN_ADDRESS:?ADMIN_ADDRESS is required}"
+ADMIN_DHCP_RANGE_START="${ADMIN_DHCP_RANGE_START:?ADMIN_DHCP_RANGE_START is required}"
+ADMIN_DHCP_RANGE_END="${ADMIN_DHCP_RANGE_END:?ADMIN_DHCP_RANGE_END is required}"
+ADMIN_DHCP_NETMASK="${ADMIN_DHCP_NETMASK:?ADMIN_DHCP_NETMASK is required}"
+ADMIN_DHCP_LEASE_TIME="${ADMIN_DHCP_LEASE_TIME:?ADMIN_DHCP_LEASE_TIME is required}"
 MQTT_LISTENER_ADDRESS="${MQTT_LISTENER_ADDRESS:?MQTT_LISTENER_ADDRESS is required}"
 MQTT_PORT="${MQTT_PORT:?MQTT_PORT is required}"
 
@@ -114,19 +137,36 @@ if [ "${FIELD_ADDRESS_IP}" != "${FIELD_GATEWAY}" ]; then
     exit 1
 fi
 
+if [ "${FIELD_INTERFACE}" = "${ADMIN_INTERFACE}" ]; then
+    echo "error: FIELD_INTERFACE and ADMIN_INTERFACE must be different" >&2
+    exit 1
+fi
+
+ADMIN_ADDRESS_IP="${ADMIN_ADDRESS%%/*}"
+if [ "${FIELD_ADDRESS_IP}" = "${ADMIN_ADDRESS_IP}" ]; then
+    echo "error: FIELD_ADDRESS and ADMIN_ADDRESS must use different interface IPs" >&2
+    exit 1
+fi
+
 # Step 4: render concrete Docker-mounted config files.
 #
 # The generated directory is ignored by Git because these files are derived
 # artifacts. Compose mounts them read-only into the service containers.
-mkdir -p "$(dirname "${DNSMASQ_TARGET}")" "$(dirname "${MOSQUITTO_TARGET}")"
+mkdir -p \
+    "$(dirname "${FIELD_DNSMASQ_TARGET}")" \
+    "$(dirname "${ADMIN_DNSMASQ_TARGET}")" \
+    "$(dirname "${MOSQUITTO_TARGET}")"
 
-render_dnsmasq_config > "${DNSMASQ_TARGET}"
+render_field_dnsmasq_config > "${FIELD_DNSMASQ_TARGET}"
+render_admin_dnsmasq_config > "${ADMIN_DNSMASQ_TARGET}"
 render_mosquitto_config > "${MOSQUITTO_TARGET}"
 
 # Step 5: validate the rendered files before reporting success.
-validate_no_placeholders "${DNSMASQ_TARGET}"
+validate_no_placeholders "${FIELD_DNSMASQ_TARGET}"
+validate_no_placeholders "${ADMIN_DNSMASQ_TARGET}"
 validate_no_placeholders "${MOSQUITTO_TARGET}"
 
 echo "Rendered Docker configs:"
-echo "- ${DNSMASQ_TARGET}"
+echo "- ${FIELD_DNSMASQ_TARGET}"
+echo "- ${ADMIN_DNSMASQ_TARGET}"
 echo "- ${MOSQUITTO_TARGET}"

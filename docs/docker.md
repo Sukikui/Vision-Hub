@@ -2,7 +2,7 @@
 
 Docker Compose is the standard Vision-Hub runtime mode on the Raspberry Pi.
 
-The physical field interface is configured on the host. Docker runs the services that use it.
+The physical Ethernet and Wi-Fi interfaces are configured on the host through NetworkManager. Docker runs the services that use those interfaces.
 
 ## Compose Stack
 
@@ -11,9 +11,10 @@ The physical field interface is configured on the host. Docker runs the services
 The stack contains:
 
 ```text
-dnsmasq    -> DHCP server for ESP32 nodes
-mosquitto  -> local MQTT broker
-vision-hub -> Python application container
+dnsmasq-field -> DHCP server for ESP32 nodes on eth0
+dnsmasq-admin -> DHCP server for admin Wi-Fi clients on wlan0
+mosquitto     -> local MQTT broker
+vision-hub    -> Python application container
 ```
 
 Starting the stack means running:
@@ -32,13 +33,14 @@ docker compose down
 
 | Compose service | Image | Image source | Build context | Dockerfile | Network | Restart |
 | --- | --- | --- | --- | --- | --- | --- |
-| `dnsmasq` | `vision-hub-dnsmasq:local` | built locally | repository root `.` | `deploy/docker/dnsmasq.Dockerfile` | host | `unless-stopped` |
+| `dnsmasq-field` | `vision-hub-dnsmasq:local` | built locally | repository root `.` | `deploy/docker/dnsmasq.Dockerfile` | host | `unless-stopped` |
+| `dnsmasq-admin` | `vision-hub-dnsmasq:local` | built locally | repository root `.` | `deploy/docker/dnsmasq.Dockerfile` | host | `unless-stopped` |
 | `mosquitto` | `eclipse-mosquitto:2` | pulled from Docker registry | not built locally | none | host | `unless-stopped` |
 | `vision-hub` | `vision-hub:local` | built locally | repository root `.` | `Dockerfile` | host | `unless-stopped` |
 
-All services use `network_mode: host`. This keeps MQTT reachable through the Raspberry Pi field IP and lets dnsmasq handle DHCP broadcast traffic on `eth0`.
+All services use `network_mode: host`. This keeps MQTT reachable through the Raspberry Pi field IP and lets dnsmasq handle DHCP broadcast traffic on `eth0` and `wlan0`.
 
-The `dnsmasq` container also uses:
+Both dnsmasq containers also use:
 
 ```yaml
 cap_add:
@@ -56,7 +58,7 @@ image: eclipse-mosquitto:2
 
 Docker pulls it from the public registry on first use, then keeps it in Docker's local image store.
 
-dnsmasq is built locally:
+dnsmasq is built locally once and reused by both DHCP services:
 
 ```yaml
 build:
@@ -84,7 +86,8 @@ docker images
 
 | Service | Entrypoint or command |
 | --- | --- |
-| `dnsmasq` | `dnsmasq --no-daemon --conf-file=/etc/dnsmasq.d/vision-hub.conf` |
+| `dnsmasq-field` | `dnsmasq --no-daemon --conf-file=/etc/dnsmasq.d/vision-hub.conf` |
+| `dnsmasq-admin` | `dnsmasq --no-daemon --conf-file=/etc/dnsmasq.d/vision-hub.conf` |
 | `mosquitto` | `mosquitto -c /mosquitto/config/vision-hub.conf` |
 | `vision-hub` | `/opt/vision-hub/.venv/bin/python main.py` |
 
@@ -100,7 +103,8 @@ Template sources:
 
 | Template | Generated file |
 | --- | --- |
-| `deploy/docker/templates/dnsmasq.conf.template` | `deploy/docker/generated/dnsmasq/vision-hub.conf` |
+| `deploy/docker/templates/dnsmasq-field.conf.template` | `deploy/docker/generated/dnsmasq-field/vision-hub.conf` |
+| `deploy/docker/templates/dnsmasq-admin.conf.template` | `deploy/docker/generated/dnsmasq-admin/vision-hub.conf` |
 | `deploy/docker/templates/mosquitto.conf.template` | `deploy/docker/generated/mosquitto/vision-hub.conf` |
 | `deploy/docker/templates/vision-hub-stack.service.template` | `/etc/systemd/system/vision-hub-stack.service` |
 
@@ -108,7 +112,8 @@ Generated repository files and mount targets:
 
 | Repository file | Container path | Mode | Consumer |
 | --- | --- | --- | --- |
-| `deploy/docker/generated/dnsmasq/vision-hub.conf` | `/etc/dnsmasq.d/vision-hub.conf` | read-only | `dnsmasq` |
+| `deploy/docker/generated/dnsmasq-field/vision-hub.conf` | `/etc/dnsmasq.d/vision-hub.conf` | read-only | `dnsmasq-field` |
+| `deploy/docker/generated/dnsmasq-admin/vision-hub.conf` | `/etc/dnsmasq.d/vision-hub.conf` | read-only | `dnsmasq-admin` |
 | `deploy/docker/generated/mosquitto/vision-hub.conf` | `/mosquitto/config/vision-hub.conf` | read-only | `mosquitto` |
 
 The generated directory is ignored by Git because it contains derived local files. It can be deleted and recreated at any time:
@@ -117,7 +122,7 @@ The generated directory is ignored by Git because it contains derived local file
 deploy/docker/render-configs.sh
 ```
 
-Docker Compose needs those generated files to exist before starting `dnsmasq` and `mosquitto`, because they are mounted into the containers.
+Docker Compose needs those generated files to exist before starting `dnsmasq-field`, `dnsmasq-admin`, and `mosquitto`, because they are mounted into the containers.
 
 ## Volumes
 
@@ -172,9 +177,10 @@ Operationally this means:
 | Command | Shows |
 | --- | --- |
 | `sudo systemctl status vision-hub-stack` | whether systemd started the Compose stack |
-| `docker compose ps` | whether `dnsmasq`, `mosquitto`, and `vision-hub` containers are running |
+| `docker compose ps` | whether `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, and `vision-hub` containers are running |
 | `docker compose logs mosquitto` | Mosquitto logs from inside the container |
-| `docker compose logs dnsmasq` | dnsmasq logs from inside the container |
+| `docker compose logs dnsmasq-field` | field DHCP logs from inside the container |
+| `docker compose logs dnsmasq-admin` | admin Wi-Fi DHCP logs from inside the container |
 
 ## Verification
 
@@ -183,7 +189,8 @@ deploy/docker/render-configs.sh
 deploy/docker/install-rpi.sh --render-service-only
 docker compose config
 docker compose ps
-docker compose logs dnsmasq
+docker compose logs dnsmasq-field
+docker compose logs dnsmasq-admin
 docker compose logs mosquitto
 docker compose logs vision-hub
 ```

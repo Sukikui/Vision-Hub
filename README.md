@@ -22,7 +22,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Package manager | `uv` |
 | Container runtime | Docker Engine with Docker Compose plugin |
 | Local MQTT broker | Mosquitto |
-| Field DHCP server | dnsmasq |
+| Field and admin DHCP | dnsmasq |
 | MQTT client | `paho-mqtt` |
 | Configuration | YAML |
 | Inference runtime | NCNN |
@@ -33,7 +33,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Item | Requirement |
 | --- | --- |
 | Python environment | project `.venv` created with `uv sync` |
-| Field interface | Raspberry Pi Ethernet configured from `deploy/rpi/` |
+| Local interfaces | Raspberry Pi Ethernet and admin Wi-Fi configured from `deploy/rpi/` |
 | Docker stack | `compose.yaml` rendered and managed through `deploy/docker/` |
 | AI model | YOLO11n exported to NCNN with `tools/export_yolo_ncnn.py` |
 | Model files | `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` present in the model directory |
@@ -63,12 +63,14 @@ uv sync
 
 `uv sync` creates the project `.venv` if it does not already exist, then installs dependencies from `pyproject.toml` and `uv.lock`.
 
-### 3. Configure the Field Interface
+### 3. Configure Local Network Interfaces
 
-Raspberry Pi field interface configuration is stored in [`deploy/rpi/`](deploy/rpi/).
+Raspberry Pi field Ethernet and admin Wi-Fi configuration is stored in [`deploy/vision-hub-network.env`](deploy/vision-hub-network.env).
+
+Change `ADMIN_WIFI_PASSWORD` before running the script on a real Raspberry Pi.
 
 ```bash
-sudo deploy/rpi/configure-field-interface.sh
+sudo deploy/rpi/configure-network-interfaces.sh
 ```
 
 ### 4. Export the Person Detection Model
@@ -103,7 +105,7 @@ deploy/docker/render-configs.sh
 sudo deploy/docker/install-rpi.sh
 ```
 
-The installed systemd service runs `docker compose up -d` at boot. The stack contains `dnsmasq`, `mosquitto`, and `vision-hub`, each with `restart: unless-stopped`.
+The installed systemd service runs `docker compose up -d` at boot. The stack contains `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, and `vision-hub`, each with `restart: unless-stopped`.
 
 ## Development
 
