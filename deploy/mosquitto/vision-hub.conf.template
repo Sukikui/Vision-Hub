@@ -1,0 +1,13 @@
+# Vision-Hub local MQTT broker configuration.
+#
+# ESP32 nodes reach this broker through the DHCP gateway IP advertised by
+# dnsmasq.
+
+listener <mqtt_port> <mqtt_listener_address>
+allow_anonymous true
+
+persistence true
+persistence_location /var/lib/mosquitto/
+
+log_dest syslog
+connection_messages true

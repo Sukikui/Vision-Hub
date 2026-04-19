@@ -1,0 +1,20 @@
+# Vision-Hub ESP32 field LAN DHCP configuration.
+#
+# The ESP32 firmware derives its MQTT broker URI from the DHCP default gateway:
+# mqtt://<field_gateway>:<mqtt_port>
+#
+# The Raspberry Pi field interface must own <field_address> before dnsmasq starts.
+
+interface=<field_interface>
+bind-interfaces
+
+# Use dnsmasq as DHCP only. The ESP32 firmware does not need DNS for MQTT broker
+# discovery because it uses the DHCP router option as the broker IP.
+port=0
+
+dhcp-authoritative
+dhcp-range=<dhcp_start>,<dhcp_end>,<dhcp_netmask>,<dhcp_lease>
+dhcp-option=option:router,<field_gateway>
+
+# Uncomment during field debugging if lease logs are needed.
+# log-dhcp
