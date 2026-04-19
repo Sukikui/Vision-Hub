@@ -5,12 +5,11 @@
 [![python](https://img.shields.io/badge/-Python_3.13-blue?logo=python&logoColor=white)](https://docs.python.org/3.13/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
+</div>
 
-Under construction.
+Under cons🚧 Under construction 🚧
 
 Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vision-Node>.
-
-</div>
 
 ## Documentation
 
