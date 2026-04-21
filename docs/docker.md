@@ -15,6 +15,7 @@ dnsmasq-field -> DHCP server for ESP32 nodes on eth0
 dnsmasq-admin -> DHCP server for admin Wi-Fi clients on wlan0
 mosquitto     -> local MQTT broker
 vision-hub    -> Python application container
+homeassistant -> local Home Assistant Container UI
 ```
 
 Starting the stack means running:
@@ -37,6 +38,7 @@ docker compose down
 | `dnsmasq-admin` | `vision-hub-dnsmasq:local` | built locally | repository root `.` | `deploy/docker/dnsmasq.Dockerfile` | host | `unless-stopped` |
 | `mosquitto` | `eclipse-mosquitto:2` | pulled from Docker registry | not built locally | none | host | `unless-stopped` |
 | `vision-hub` | `vision-hub:local` | built locally | repository root `.` | `Dockerfile` | host | `unless-stopped` |
+| `homeassistant` | `ghcr.io/home-assistant/home-assistant:stable` | pulled from GitHub Container Registry | not built locally | none | host | `unless-stopped` |
 
 All services use `network_mode: host`. This keeps MQTT reachable through the Raspberry Pi field IP and lets dnsmasq handle DHCP broadcast traffic on `eth0` and `wlan0`.
 
@@ -57,6 +59,14 @@ image: eclipse-mosquitto:2
 ```
 
 Docker pulls it from the public registry on first use, then keeps it in Docker's local image store.
+
+Home Assistant uses the official Home Assistant Container image:
+
+```yaml
+image: ghcr.io/home-assistant/home-assistant:stable
+```
+
+This is the container installation type, not Home Assistant OS. It fits Vision-Hub because Raspberry Pi OS Lite remains the host operating system and Docker Compose remains the stack manager. Home Assistant Container does not include Home Assistant OS apps/add-ons.
 
 dnsmasq is built locally once and reused by both DHCP services:
 
@@ -90,6 +100,7 @@ docker images
 | `dnsmasq-admin` | `dnsmasq --no-daemon --conf-file=/etc/dnsmasq.d/vision-hub.conf` |
 | `mosquitto` | `mosquitto -c /mosquitto/config/vision-hub.conf` |
 | `vision-hub` | `/opt/vision-hub/.venv/bin/python main.py` |
+| `homeassistant` | Home Assistant container default command |
 
 ## Generated Configs
 
@@ -132,6 +143,9 @@ Docker Compose needs those generated files to exist before starting `dnsmasq-fie
 | `mosquitto-data` | `/mosquitto/data` | read-write | Mosquitto persistence |
 | `mosquitto-log` | `/mosquitto/log` | read-write | Mosquitto log directory |
 | `${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}` | `/var/lib/vision-hub` | read-write | Vision-Hub capture storage |
+| `${HOME_ASSISTANT_CONFIG_DIR:-/var/lib/vision-hub-homeassistant}` | `/config` | read-write | Home Assistant configuration and database |
+| `/etc/localtime` | `/etc/localtime` | read-only | host timezone file |
+| `/run/dbus` | `/run/dbus` | read-only | optional host D-Bus access for Home Assistant integrations |
 
 Vision-Hub capture storage is a bind mount, not a Docker volume. This keeps received images on a predictable host path. In a microSD-only deployment, the default path lives on the microSD filesystem. If external storage is added later, `VISION_HUB_HOST_DATA_DIR` can point to that mount without changing the container path.
 
@@ -139,6 +153,8 @@ The boot service loads `deploy/vision-hub-network.env` through systemd `Environm
 
 ```env
 VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
+HOME_ASSISTANT_CONFIG_DIR=/var/lib/vision-hub-homeassistant
+HOME_ASSISTANT_TZ=Europe/Paris
 ```
 
 `vision-hub` receives these runtime environment variables:
@@ -149,6 +165,30 @@ VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 | `VISION_HUB_MQTT_PORT` | `1883` |
 | `VISION_HUB_MODEL_PATH` | `/opt/vision-hub/models/yolo11n-ncnn` |
 | `VISION_HUB_DATA_DIR` | `/var/lib/vision-hub` |
+
+`homeassistant` receives:
+
+| Variable | Value |
+| --- | --- |
+| `TZ` | `${HOME_ASSISTANT_TZ:-Europe/Paris}` |
+
+## Home Assistant Access
+
+Home Assistant listens on port `8123` through host networking.
+
+From a device connected to the Vision-Hub admin Wi-Fi:
+
+```text
+http://192.168.60.1:8123
+```
+
+From the ESP32 field LAN, if an operator is physically connected to that network:
+
+```text
+http://192.168.50.1:8123
+```
+
+The first visit starts Home Assistant onboarding. Vision-Hub later publishes clean MQTT entities to the local Mosquitto broker so Home Assistant can display node status, detections, and system health without seeing ESP32 image chunks.
 
 ## Boot Service
 
@@ -185,10 +225,11 @@ Operationally this means:
 | Command | Shows |
 | --- | --- |
 | `sudo systemctl status vision-hub-stack` | whether systemd started the Compose stack |
-| `docker compose ps` | whether `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, and `vision-hub` containers are running |
+| `docker compose ps` | whether stack containers are running |
 | `docker compose logs mosquitto` | Mosquitto logs from inside the container |
 | `docker compose logs dnsmasq-field` | field DHCP logs from inside the container |
 | `docker compose logs dnsmasq-admin` | admin Wi-Fi DHCP logs from inside the container |
+| `docker compose logs homeassistant` | Home Assistant logs from inside the container |
 
 ## Verification
 
@@ -201,6 +242,7 @@ docker compose logs dnsmasq-field
 docker compose logs dnsmasq-admin
 docker compose logs mosquitto
 docker compose logs vision-hub
+docker compose logs homeassistant
 ```
 
 Check the systemd unit:

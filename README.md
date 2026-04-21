@@ -31,6 +31,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Container runtime | Docker Engine with Docker Compose plugin |
 | Local MQTT broker | Mosquitto |
 | Field and admin DHCP | dnsmasq |
+| Local operator UI | Home Assistant Container |
 | MQTT client | `paho-mqtt` |
 | Configuration | YAML |
 | Inference runtime | NCNN |
@@ -46,6 +47,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | AI model | YOLO11n exported to NCNN with `tools/export_yolo_ncnn.py` |
 | Model files | `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` present in the model directory |
 | Capture storage | host directory mounted at `/var/lib/vision-hub` in the container |
+| Home Assistant config | host directory mounted at `/config` in the Home Assistant container |
 | Field network | ESP32 nodes can reach the Raspberry Pi MQTT broker, typically on port `1883` |
 
 ## Getting Started
@@ -119,6 +121,8 @@ Capture data is stored through the host path configured in [`deploy/vision-hub-n
 
 ```env
 VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
+HOME_ASSISTANT_CONFIG_DIR=/var/lib/vision-hub-homeassistant
+HOME_ASSISTANT_TZ=Europe/Paris
 ```
 
 On the Raspberry Pi, this path points to the host directory used for received frames. In a microSD-only deployment, it lives on the microSD card. If external storage is added later, this value can point to that mount instead. Inside the container it is always mounted as `/var/lib/vision-hub`.
@@ -128,7 +132,13 @@ deploy/docker/render-configs.sh
 sudo deploy/docker/install-rpi.sh
 ```
 
-The installed systemd service runs `docker compose up -d` at boot. The stack contains `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, and `vision-hub`, each with `restart: unless-stopped`.
+The installed systemd service runs `docker compose up -d` at boot. The stack contains `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, `vision-hub`, and `homeassistant`, each with `restart: unless-stopped`.
+
+Home Assistant is available from the admin Wi-Fi network at:
+
+```text
+http://192.168.60.1:8123
+```
 
 ## Development
 

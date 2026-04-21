@@ -54,6 +54,21 @@ services:
         target: /var/lib/vision-hub
     restart: unless-stopped
 
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    network_mode: host
+    privileged: true
+    environment:
+      TZ: ${HOME_ASSISTANT_TZ:-Europe/Paris}
+    volumes:
+      - type: bind
+        source: ${HOME_ASSISTANT_CONFIG_DIR:-/var/lib/vision-hub-homeassistant}
+        target: /config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+    restart: unless-stopped
+
 volumes:
   mosquitto-data:
   mosquitto-log:

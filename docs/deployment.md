@@ -17,6 +17,7 @@ Raspberry Pi boot
         -> dnsmasq-admin container
         -> mosquitto container
         -> vision-hub container
+        -> homeassistant container
 ```
 
 There is no separate `dnsmasq.service` or `mosquitto.service` in the Docker deployment. Those processes run inside containers managed by Docker Compose.
@@ -31,17 +32,18 @@ There is no separate `dnsmasq.service` or `mosquitto.service` in the Docker depl
 | DHCP for admin Wi-Fi clients | `dnsmasq-admin` container |
 | local MQTT broker | Mosquitto container |
 | hub application | Vision-Hub Python container |
+| local operator UI | Home Assistant Container |
 | capture storage | host directory bind-mounted into the Vision-Hub container |
 
 ## Deployment Files
 
 | Path | Role |
 | --- | --- |
-| `deploy/vision-hub-network.env` | source of truth for network values and the host capture-storage path |
+| `deploy/vision-hub-network.env` | source of truth for network values, host capture-storage path, and Home Assistant config path |
 | `deploy/rpi/configure-network-interfaces.sh` | creates or updates the Raspberry Pi Ethernet and Wi-Fi AP profiles |
 | `deploy/docker/render-configs.sh` | renders Docker-mounted dnsmasq and Mosquitto configs |
 | `deploy/docker/install-rpi.sh` | installs and enables the `vision-hub-stack.service` systemd unit |
-| `compose.yaml` | defines the `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, and `vision-hub` containers |
+| `compose.yaml` | defines the `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, `vision-hub`, and `homeassistant` containers |
 
 The old non-Docker split is intentionally gone. dnsmasq and Mosquitto are not installed as independent host services; Compose starts them from `compose.yaml`.
 
@@ -74,6 +76,20 @@ sudo deploy/docker/install-rpi.sh
 
 Captured frames are stored in the container under `/var/lib/vision-hub`. Docker maps that path to the host directory configured by `VISION_HUB_HOST_DATA_DIR` in `deploy/vision-hub-network.env`. The default is a microSD-backed host directory; it can be changed later to an external storage mount.
 
+Home Assistant is exposed by the `homeassistant` container on the Raspberry Pi host network. An operator connected to the admin Wi-Fi can open:
+
+```text
+http://192.168.60.1:8123
+```
+
+The ESP32 field network address also exposes the same service:
+
+```text
+http://192.168.50.1:8123
+```
+
+Home Assistant configuration is stored on the host path configured by `HOME_ASSISTANT_CONFIG_DIR`.
+
 ## Docs
 
 | Document | Content |
@@ -93,6 +109,7 @@ docker compose logs dnsmasq-field
 docker compose logs dnsmasq-admin
 docker compose logs mosquitto
 docker compose logs vision-hub
+docker compose logs homeassistant
 ```
 
 Expected ESP32 logs:
@@ -109,4 +126,5 @@ Expected admin client state:
 SSID: VisionHub-Admin
 client IP: 192.168.60.x
 RPi admin IP: 192.168.60.1
+Home Assistant: http://192.168.60.1:8123
 ```

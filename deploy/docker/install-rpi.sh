@@ -104,19 +104,21 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 1
 fi
 
-# Step 5: load the deployment env and make sure the host capture directory
-# exists before Docker tries to bind-mount it into the vision-hub container.
+# Step 5: load the deployment env and make sure host persistence directories
+# exist before Docker tries to bind-mount them into containers.
 #
-# The default path is on the Raspberry Pi microSD filesystem. Operators can
-# point VISION_HUB_HOST_DATA_DIR to external storage later without changing the
-# container path.
+# The default paths are on the Raspberry Pi microSD filesystem. Operators can
+# point VISION_HUB_HOST_DATA_DIR or HOME_ASSISTANT_CONFIG_DIR to external
+# storage later without changing container paths.
 if [ -f "${ENV_FILE}" ]; then
     # shellcheck disable=SC1090
     . "${ENV_FILE}"
 fi
 
 VISION_HUB_HOST_DATA_DIR="${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}"
+HOME_ASSISTANT_CONFIG_DIR="${HOME_ASSISTANT_CONFIG_DIR:-/var/lib/vision-hub-homeassistant}"
 install -d -m 0755 "${VISION_HUB_HOST_DATA_DIR}"
+install -d -m 0755 "${HOME_ASSISTANT_CONFIG_DIR}"
 
 # Step 6: render Docker-mounted service configs before enabling the stack.
 #

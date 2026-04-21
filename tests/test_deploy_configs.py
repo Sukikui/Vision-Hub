@@ -216,7 +216,7 @@ class DeployConfigTest(unittest.TestCase):
         compose = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         services = compose["services"]
 
-        for service_name in ("dnsmasq-field", "dnsmasq-admin", "mosquitto", "vision-hub"):
+        for service_name in ("dnsmasq-field", "dnsmasq-admin", "mosquitto", "vision-hub", "homeassistant"):
             with self.subTest(service=service_name):
                 service = services[service_name]
                 self.assertEqual(service["network_mode"], "host")
@@ -236,8 +236,22 @@ class DeployConfigTest(unittest.TestCase):
                 "target": "/var/lib/vision-hub",
             },
         )
+        self.assertEqual(services["homeassistant"]["image"], "ghcr.io/home-assistant/home-assistant:stable")
+        self.assertTrue(services["homeassistant"]["privileged"])
+        self.assertEqual(services["homeassistant"]["environment"]["TZ"], "${HOME_ASSISTANT_TZ:-Europe/Paris}")
+        self.assertEqual(
+            services["homeassistant"]["volumes"][0],
+            {
+                "type": "bind",
+                "source": "${HOME_ASSISTANT_CONFIG_DIR:-/var/lib/vision-hub-homeassistant}",
+                "target": "/config",
+            },
+        )
+        self.assertIn("/etc/localtime:/etc/localtime:ro", services["homeassistant"]["volumes"])
+        self.assertIn("/run/dbus:/run/dbus:ro", services["homeassistant"]["volumes"])
         self.assertIn("mosquitto-data", compose["volumes"])
         self.assertNotIn("vision-hub-data", compose["volumes"])
+        self.assertNotIn("homeassistant-data", compose["volumes"])
 
     def test_docker_compose_config_when_available(self) -> None:
         """Validate the Compose file with Docker Compose when available."""
