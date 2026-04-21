@@ -65,6 +65,7 @@ render_admin_dnsmasq_config() {
         -e "s|<admin_interface>|${ADMIN_INTERFACE}|g" \
         -e "s|<admin_address>|${ADMIN_ADDRESS}|g" \
         -e "s|<admin_address_ip>|${ADMIN_ADDRESS_IP}|g" \
+        -e "s|<admin_dns_name>|${ADMIN_DNS_NAME}|g" \
         -e "s|<admin_start>|${ADMIN_DHCP_RANGE_START}|g" \
         -e "s|<admin_end>|${ADMIN_DHCP_RANGE_END}|g" \
         -e "s|<admin_netmask>|${ADMIN_DHCP_NETMASK}|g" \
@@ -119,6 +120,7 @@ ADMIN_DHCP_RANGE_START="${ADMIN_DHCP_RANGE_START:?ADMIN_DHCP_RANGE_START is requ
 ADMIN_DHCP_RANGE_END="${ADMIN_DHCP_RANGE_END:?ADMIN_DHCP_RANGE_END is required}"
 ADMIN_DHCP_NETMASK="${ADMIN_DHCP_NETMASK:?ADMIN_DHCP_NETMASK is required}"
 ADMIN_DHCP_LEASE_TIME="${ADMIN_DHCP_LEASE_TIME:?ADMIN_DHCP_LEASE_TIME is required}"
+ADMIN_DNS_NAME="${ADMIN_DNS_NAME:?ADMIN_DNS_NAME is required}"
 MQTT_LISTENER_ADDRESS="${MQTT_LISTENER_ADDRESS:?MQTT_LISTENER_ADDRESS is required}"
 MQTT_PORT="${MQTT_PORT:?MQTT_PORT is required}"
 

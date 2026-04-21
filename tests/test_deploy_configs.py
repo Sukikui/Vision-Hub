@@ -63,6 +63,7 @@ class DeployConfigTest(unittest.TestCase):
                         "ADMIN_DHCP_RANGE_END=192.168.70.80",
                         "ADMIN_DHCP_NETMASK=255.255.255.0",
                         "ADMIN_DHCP_LEASE_TIME=6h",
+                        "ADMIN_DNS_NAME=hub.test",
                         "MQTT_LISTENER_ADDRESS=192.168.60.1",
                         "MQTT_PORT=1884",
                     )
@@ -90,6 +91,9 @@ class DeployConfigTest(unittest.TestCase):
         self.assertIn("mqtt://192.168.60.1:1884", field_dnsmasq_config)
         self.assertIn("interface=wlp2s0", admin_dnsmasq_config)
         self.assertIn("dhcp-range=192.168.70.20,192.168.70.80,255.255.255.0,6h", admin_dnsmasq_config)
+        self.assertIn("listen-address=192.168.70.1", admin_dnsmasq_config)
+        self.assertIn("address=/hub.test/192.168.70.1", admin_dnsmasq_config)
+        self.assertIn("dhcp-option=option:dns-server,192.168.70.1", admin_dnsmasq_config)
         self.assertNotIn("dhcp-option=option:router", admin_dnsmasq_config)
         self.assertIn("listener 1884 192.168.60.1", mosquitto_config)
 
@@ -114,6 +118,7 @@ class DeployConfigTest(unittest.TestCase):
                         "ADMIN_DHCP_RANGE_END=192.168.60.100",
                         "ADMIN_DHCP_NETMASK=255.255.255.0",
                         "ADMIN_DHCP_LEASE_TIME=12h",
+                        "ADMIN_DNS_NAME=vision-hub.lan",
                         "MQTT_LISTENER_ADDRESS=0.0.0.0",
                         "MQTT_PORT=1883",
                     )
@@ -147,6 +152,7 @@ class DeployConfigTest(unittest.TestCase):
                         "ADMIN_DHCP_RANGE_END=192.168.60.100",
                         "ADMIN_DHCP_NETMASK=255.255.255.0",
                         "ADMIN_DHCP_LEASE_TIME=12h",
+                        "ADMIN_DNS_NAME=vision-hub.lan",
                         "MQTT_LISTENER_ADDRESS=0.0.0.0",
                         "MQTT_PORT=1883",
                     )
@@ -188,6 +194,10 @@ class DeployConfigTest(unittest.TestCase):
         self.assertIn("mqtt://192.168.50.1:1883", field_dnsmasq_config)
         self.assertIn("interface=wlan0", admin_dnsmasq_config)
         self.assertIn("dhcp-range=192.168.60.20,192.168.60.100,255.255.255.0,12h", admin_dnsmasq_config)
+        self.assertIn("port=53", admin_dnsmasq_config)
+        self.assertIn("listen-address=192.168.60.1", admin_dnsmasq_config)
+        self.assertIn("address=/vision-hub.lan/192.168.60.1", admin_dnsmasq_config)
+        self.assertIn("dhcp-option=option:dns-server,192.168.60.1", admin_dnsmasq_config)
         self.assertNotIn("dhcp-option=option:router", admin_dnsmasq_config)
         self.assertIn("listener 1883 0.0.0.0", mosquitto_config)
         self.assertIn("persistence_location /mosquitto/data/", mosquitto_config)

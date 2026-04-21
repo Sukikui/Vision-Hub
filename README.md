@@ -123,6 +123,7 @@ Capture data is stored through the host path configured in [`deploy/vision-hub-n
 VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 HOME_ASSISTANT_CONFIG_DIR=/var/lib/vision-hub-homeassistant
 HOME_ASSISTANT_TZ=Europe/Paris
+ADMIN_DNS_NAME=vision-hub.lan
 ```
 
 On the Raspberry Pi, this path points to the host directory used for received frames. In a microSD-only deployment, it lives on the microSD card. If external storage is added later, this value can point to that mount instead. Inside the container it is always mounted as `/var/lib/vision-hub`.
@@ -137,8 +138,10 @@ The installed systemd service runs `docker compose up -d` at boot. The stack con
 Home Assistant is available from the admin Wi-Fi network at:
 
 ```text
-http://192.168.60.1:8123
+http://vision-hub.lan:8123
 ```
+
+The `:8123` port is required because Home Assistant does not listen on port `80`.
 
 ## Development
 

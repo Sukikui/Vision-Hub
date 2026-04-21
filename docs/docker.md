@@ -155,6 +155,7 @@ The boot service loads `deploy/vision-hub-network.env` through systemd `Environm
 VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 HOME_ASSISTANT_CONFIG_DIR=/var/lib/vision-hub-homeassistant
 HOME_ASSISTANT_TZ=Europe/Paris
+ADMIN_DNS_NAME=vision-hub.lan
 ```
 
 `vision-hub` receives these runtime environment variables:
@@ -179,8 +180,10 @@ Home Assistant listens on port `8123` through host networking.
 From a device connected to the Vision-Hub admin Wi-Fi:
 
 ```text
-http://192.168.60.1:8123
+http://vision-hub.lan:8123
 ```
+
+`vision-hub.lan` is served by `dnsmasq-admin` and resolves to `192.168.60.1` on the admin Wi-Fi. The port is still required because Home Assistant listens on `8123`, not HTTP port `80`.
 
 From the ESP32 field LAN, if an operator is physically connected to that network:
 

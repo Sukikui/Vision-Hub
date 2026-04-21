@@ -79,10 +79,18 @@ Captured frames are stored in the container under `/var/lib/vision-hub`. Docker 
 Home Assistant is exposed by the `homeassistant` container on the Raspberry Pi host network. An operator connected to the admin Wi-Fi can open:
 
 ```text
+http://vision-hub.lan:8123
+```
+
+`vision-hub.lan` is resolved by `dnsmasq-admin` on the admin Wi-Fi and points to `192.168.60.1`. The `:8123` port is required because Home Assistant does not listen on the standard HTTP port.
+
+The raw admin IP also works:
+
+```text
 http://192.168.60.1:8123
 ```
 
-The ESP32 field network address also exposes the same service:
+The ESP32 field network address exposes the same service if an operator is connected to that network:
 
 ```text
 http://192.168.50.1:8123
@@ -126,5 +134,6 @@ Expected admin client state:
 SSID: VisionHub-Admin
 client IP: 192.168.60.x
 RPi admin IP: 192.168.60.1
-Home Assistant: http://192.168.60.1:8123
+Admin DNS: vision-hub.lan
+Home Assistant: http://vision-hub.lan:8123
 ```

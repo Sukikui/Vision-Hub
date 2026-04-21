@@ -38,9 +38,18 @@ The field DHCP service must advertise router option `192.168.50.1`, because the 
 | Admin Wi-Fi SSID | `VisionHub-Admin` |
 | Raspberry Pi admin address | `192.168.60.1/24` |
 | Admin DHCP range | `192.168.60.20` to `192.168.60.100` |
-| Admin UI target | `http://192.168.60.1:<ui-port>` |
+| Admin DNS name | `vision-hub.lan` |
+| Home Assistant UI | `http://vision-hub.lan:8123` |
 
 The admin DHCP service does not advertise a router option. A connected laptop reaches `192.168.60.1` directly on-link, without making the Raspberry Pi its default internet gateway.
+
+`dnsmasq-admin` also provides local DNS on the admin Wi-Fi only:
+
+```text
+vision-hub.lan -> 192.168.60.1
+```
+
+The DNS service does not forward internet DNS. It only gives admin clients a stable local name for Raspberry Pi services. Home Assistant still uses its default port, so the URL includes `:8123`.
 
 ## Shared Configuration
 
@@ -65,6 +74,7 @@ ADMIN_WIFI_SSID=VisionHub-Admin
 ADMIN_WIFI_PASSWORD=change-this-admin-password
 ADMIN_WIFI_BAND=bg
 ADMIN_WIFI_CHANNEL=6
+ADMIN_DNS_NAME=vision-hub.lan
 
 MQTT_LISTENER_ADDRESS=0.0.0.0
 MQTT_PORT=1883

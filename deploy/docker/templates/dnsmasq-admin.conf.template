@@ -5,13 +5,20 @@
 
 interface=<admin_interface>
 bind-interfaces
+listen-address=<admin_address_ip>
 
-# DHCP only. The admin Wi-Fi is for direct access to the Raspberry Pi services,
-# not for DNS forwarding.
-port=0
+# Local DNS only. Admin clients can resolve <admin_dns_name> to the Raspberry Pi
+# admin address, but this dnsmasq instance does not forward internet DNS.
+port=53
+domain-needed
+bogus-priv
+no-resolv
+no-hosts
+address=/<admin_dns_name>/<admin_address_ip>
 
 dhcp-authoritative
 dhcp-range=<admin_start>,<admin_end>,<admin_netmask>,<admin_lease>
+dhcp-option=option:dns-server,<admin_address_ip>
 
 # No DHCP router option is advertised on the admin Wi-Fi. A connected laptop can
 # reach <admin_address_ip> directly on-link without making the Raspberry Pi its
