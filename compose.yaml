@@ -49,10 +49,11 @@ services:
       VISION_HUB_DATA_DIR: "/var/lib/vision-hub"
     volumes:
       - ./models/yolo11n-ncnn:/opt/vision-hub/models/yolo11n-ncnn:ro
-      - vision-hub-data:/var/lib/vision-hub
+      - type: bind
+        source: ${VISION_HUB_HOST_DATA_DIR:-/mnt/vision-hub-ssd/data}
+        target: /var/lib/vision-hub
     restart: unless-stopped
 
 volumes:
   mosquitto-data:
   mosquitto-log:
-  vision-hub-data:

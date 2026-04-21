@@ -203,6 +203,7 @@ class DeployConfigTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"WorkingDirectory={ROOT}", result.stdout)
+        self.assertIn(f"EnvironmentFile={ROOT}/deploy/vision-hub-network.env", result.stdout)
         self.assertIn(f"ExecStartPre={ROOT}/deploy/docker/render-configs.sh", result.stdout)
         self.assertIn("ExecStart=/usr/bin/docker compose up -d --remove-orphans", result.stdout)
         self.assertIn("ExecStop=/usr/bin/docker compose down", result.stdout)
@@ -227,8 +228,16 @@ class DeployConfigTest(unittest.TestCase):
         self.assertIn("dnsmasq-admin/vision-hub.conf", services["dnsmasq-admin"]["volumes"][0])
         self.assertIn("eclipse-mosquitto:2", services["mosquitto"]["image"])
         self.assertEqual(services["vision-hub"]["environment"]["VISION_HUB_MQTT_HOST"], "127.0.0.1")
+        self.assertEqual(
+            services["vision-hub"]["volumes"][1],
+            {
+                "type": "bind",
+                "source": "${VISION_HUB_HOST_DATA_DIR:-/mnt/vision-hub-ssd/data}",
+                "target": "/var/lib/vision-hub",
+            },
+        )
         self.assertIn("mosquitto-data", compose["volumes"])
-        self.assertIn("vision-hub-data", compose["volumes"])
+        self.assertNotIn("vision-hub-data", compose["volumes"])
 
     def test_docker_compose_config_when_available(self) -> None:
         """Validate the Compose file with Docker Compose when available."""

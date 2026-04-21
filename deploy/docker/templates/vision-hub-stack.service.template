@@ -10,6 +10,7 @@ ConditionPathExists=<project_dir>/deploy/docker/render-configs.sh
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=<project_dir>
+EnvironmentFile=<project_dir>/deploy/vision-hub-network.env
 ExecStartPre=<project_dir>/deploy/docker/render-configs.sh
 ExecStart=<docker_bin> compose up -d --remove-orphans
 ExecStop=<docker_bin> compose down

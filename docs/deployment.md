@@ -31,12 +31,13 @@ There is no separate `dnsmasq.service` or `mosquitto.service` in the Docker depl
 | DHCP for admin Wi-Fi clients | `dnsmasq-admin` container |
 | local MQTT broker | Mosquitto container |
 | hub application | Vision-Hub Python container |
+| capture storage | host SSD bind-mounted into the Vision-Hub container |
 
 ## Deployment Files
 
 | Path | Role |
 | --- | --- |
-| `deploy/vision-hub-network.env` | source of truth for field and admin network values |
+| `deploy/vision-hub-network.env` | source of truth for network values and the host capture-storage path |
 | `deploy/rpi/configure-network-interfaces.sh` | creates or updates the Raspberry Pi Ethernet and Wi-Fi AP profiles |
 | `deploy/docker/render-configs.sh` | renders Docker-mounted dnsmasq and Mosquitto configs |
 | `deploy/docker/install-rpi.sh` | installs and enables the `vision-hub-stack.service` systemd unit |
@@ -71,12 +72,15 @@ sudo deploy/docker/install-rpi.sh
 
 `render-configs.sh` can be run manually, but `install-rpi.sh` also runs it before installing the service. The installed systemd unit renders configs again at each start, then starts the Docker Compose stack.
 
+Captured frames are stored in the container under `/var/lib/vision-hub`. Docker maps that path to the host directory configured by `VISION_HUB_HOST_DATA_DIR` in `deploy/vision-hub-network.env`, which should point to the Raspberry Pi SSD mount.
+
 ## Docs
 
 | Document | Content |
 | --- | --- |
 | [Network](network.md) | field LAN contract, DHCP gateway, Raspberry Pi interface |
 | [Docker](docker.md) | Compose stack, containers, volumes, systemd boot service |
+| [Storage](storage.md) | MQTT image reconstruction and SSD-backed capture storage |
 | [Inference](inference.md) | NCNN YOLO model, export, and runtime loading |
 
 ## Quick Verification
