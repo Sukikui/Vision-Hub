@@ -76,6 +76,28 @@ Default limits:
 
 If a node starts a transfer that would exceed these limits, the transfer is rejected before allocating more memory.
 
+## Retention Policy
+
+Capture retention is handled by `StorageRetentionJob`. The job is independent from MQTT reception, but the service calls different methods at different moments.
+
+| Method | When | Work done |
+| --- | --- | --- |
+| `ensure_free_space()` | after each stored `StoredFrame` | cheap free-space check; scans and deletes only if free space is too low |
+| `cleanup_by_age()` | periodic background task, normally once per day | scan captures and delete files older than the age cutoff |
+| `run_once()` | manual maintenance pass | age cleanup, then free-space cleanup |
+
+Retention uses these defaults:
+
+| Rule | Default | Effect |
+| --- | ---: | --- |
+| maximum age | `31 days` | delete `.jpg` captures older than the cutoff |
+| minimum free space | `5 GB` | start disk-pressure cleanup |
+| target free space | `10 GB` | delete oldest remaining captures until this free-space target is reached |
+
+The free-space check is safe to run after each image because it only calls the filesystem usage API when space is healthy. It scans capture files only when free space is below `5 GB`. Age cleanup is not tied to writes because deleting files older than 31 days is not time-critical and requires a file scan.
+
+Only `.jpg` capture files are managed. Empty date and node directories are removed after file deletion.
+
 ## Storage Layout
 
 Container path:
@@ -189,6 +211,30 @@ Returned frame:
 | `received_at` | Raspberry Pi local time when metadata arrived |
 | `completed_at` | Raspberry Pi local time when finalization succeeded |
 | `total_size` | final JPEG size in bytes |
+
+Retention config:
+
+```python
+from pathlib import Path
+
+from vision_hub.storage import StorageRetentionConfig, StorageRetentionJob
+
+retention = StorageRetentionJob(
+    StorageRetentionConfig(
+        captures_dir=Path("/var/lib/vision-hub/captures"),
+        max_age_days=31,
+        min_free_bytes=5_000_000_000,
+        target_free_bytes=10_000_000_000,
+        age_cleanup_interval_s=86_400,
+    )
+)
+
+# After each StoredFrame:
+retention.ensure_free_space()
+
+# Periodic background cleanup:
+retention.cleanup_by_age()
+```
 
 ## Docker Storage
 
