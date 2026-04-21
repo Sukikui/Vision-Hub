@@ -31,7 +31,7 @@ There is no separate `dnsmasq.service` or `mosquitto.service` in the Docker depl
 | DHCP for admin Wi-Fi clients | `dnsmasq-admin` container |
 | local MQTT broker | Mosquitto container |
 | hub application | Vision-Hub Python container |
-| capture storage | host SSD bind-mounted into the Vision-Hub container |
+| capture storage | host directory bind-mounted into the Vision-Hub container |
 
 ## Deployment Files
 
@@ -72,7 +72,7 @@ sudo deploy/docker/install-rpi.sh
 
 `render-configs.sh` can be run manually, but `install-rpi.sh` also runs it before installing the service. The installed systemd unit renders configs again at each start, then starts the Docker Compose stack.
 
-Captured frames are stored in the container under `/var/lib/vision-hub`. Docker maps that path to the host directory configured by `VISION_HUB_HOST_DATA_DIR` in `deploy/vision-hub-network.env`, which should point to the Raspberry Pi SSD mount.
+Captured frames are stored in the container under `/var/lib/vision-hub`. Docker maps that path to the host directory configured by `VISION_HUB_HOST_DATA_DIR` in `deploy/vision-hub-network.env`. The default is a microSD-backed host directory; it can be changed later to an external storage mount.
 
 ## Docs
 
@@ -80,7 +80,7 @@ Captured frames are stored in the container under `/var/lib/vision-hub`. Docker 
 | --- | --- |
 | [Network](network.md) | field LAN contract, DHCP gateway, Raspberry Pi interface |
 | [Docker](docker.md) | Compose stack, containers, volumes, systemd boot service |
-| [Storage](storage.md) | MQTT image reconstruction and SSD-backed capture storage |
+| [Storage](storage.md) | MQTT image reconstruction and microSD-aware capture storage |
 | [Inference](inference.md) | NCNN YOLO model, export, and runtime loading |
 
 ## Quick Verification

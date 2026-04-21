@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 DEPLOY_DIR="$(dirname "${SCRIPT_DIR}")"
 PROJECT_DIR="$(dirname "${DEPLOY_DIR}")"
+ENV_FILE="${DEPLOY_DIR}/vision-hub-network.env"
 SERVICE_TEMPLATE="${SCRIPT_DIR}/templates/vision-hub-stack.service.template"
 SERVICE_TARGET="/etc/systemd/system/vision-hub-stack.service"
 RENDER_SERVICE_ONLY=false
@@ -103,13 +104,27 @@ if ! docker compose version >/dev/null 2>&1; then
     exit 1
 fi
 
-# Step 5: render Docker-mounted service configs before enabling the stack.
+# Step 5: load the deployment env and make sure the host capture directory
+# exists before Docker tries to bind-mount it into the vision-hub container.
+#
+# The default path is on the Raspberry Pi microSD filesystem. Operators can
+# point VISION_HUB_HOST_DATA_DIR to external storage later without changing the
+# container path.
+if [ -f "${ENV_FILE}" ]; then
+    # shellcheck disable=SC1090
+    . "${ENV_FILE}"
+fi
+
+VISION_HUB_HOST_DATA_DIR="${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}"
+install -d -m 0755 "${VISION_HUB_HOST_DATA_DIR}"
+
+# Step 6: render Docker-mounted service configs before enabling the stack.
 #
 # The systemd unit also renders them on each start, so changes in
 # deploy/vision-hub-network.env are picked up after reboot or service restart.
 "${SCRIPT_DIR}/render-configs.sh"
 
-# Step 6: render the systemd unit to a temporary file, then install it atomically
+# Step 7: render the systemd unit to a temporary file, then install it atomically
 # with the expected root-owned permissions.
 TMP_SERVICE="$(mktemp)"
 trap 'rm -f "${TMP_SERVICE}"' EXIT
@@ -117,7 +132,7 @@ trap 'rm -f "${TMP_SERVICE}"' EXIT
 render_service "${DOCKER_BIN_RESOLVED}" > "${TMP_SERVICE}"
 install -D -m 0644 "${TMP_SERVICE}" "${SERVICE_TARGET}"
 
-# Step 7: reload systemd and enable the stack immediately and at boot.
+# Step 8: reload systemd and enable the stack immediately and at boot.
 systemctl daemon-reload
 systemctl enable --now vision-hub-stack.service
 

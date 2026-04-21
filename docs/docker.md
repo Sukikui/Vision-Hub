@@ -131,14 +131,14 @@ Docker Compose needs those generated files to exist before starting `dnsmasq-fie
 | `models/yolo11n-ncnn` | `/opt/vision-hub/models/yolo11n-ncnn` | read-only | NCNN model artifacts |
 | `mosquitto-data` | `/mosquitto/data` | read-write | Mosquitto persistence |
 | `mosquitto-log` | `/mosquitto/log` | read-write | Mosquitto log directory |
-| `${VISION_HUB_HOST_DATA_DIR:-/mnt/vision-hub-ssd/data}` | `/var/lib/vision-hub` | read-write | Vision-Hub capture storage |
+| `${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}` | `/var/lib/vision-hub` | read-write | Vision-Hub capture storage |
 
-Vision-Hub capture storage is a bind mount, not a Docker volume. This keeps received images on a predictable host path, so the Raspberry Pi can place them on an SSD mounted at `/mnt/vision-hub-ssd`.
+Vision-Hub capture storage is a bind mount, not a Docker volume. This keeps received images on a predictable host path. In a microSD-only deployment, the default path lives on the microSD filesystem. If external storage is added later, `VISION_HUB_HOST_DATA_DIR` can point to that mount without changing the container path.
 
 The boot service loads `deploy/vision-hub-network.env` through systemd `EnvironmentFile`, so this variable is visible to `docker compose up` at boot:
 
 ```env
-VISION_HUB_HOST_DATA_DIR=/mnt/vision-hub-ssd/data
+VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 ```
 
 `vision-hub` receives these runtime environment variables:

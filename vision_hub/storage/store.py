@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -38,6 +37,7 @@ class ImageStoreConfig:
     Args:
         data_dir: Root directory used for temporary and final image files.
         max_image_size_bytes: Maximum accepted image size in bytes.
+        max_buffered_bytes: Maximum memory used by active image transfers.
         session_timeout_s: Age after which an incomplete transfer can be
             cleaned up.
         allowed_content_types: MIME content types accepted from ESP32 nodes.
@@ -45,6 +45,7 @@ class ImageStoreConfig:
 
     data_dir: Path
     max_image_size_bytes: int = 5_000_000
+    max_buffered_bytes: int = 64_000_000
     session_timeout_s: int = 30
     allowed_content_types: Iterable[str] = field(default_factory=lambda: _DEFAULT_CONTENT_TYPES)
 
@@ -60,6 +61,10 @@ class ImageStoreConfig:
 
         if self.max_image_size_bytes <= 0:
             raise ImageStoreError("max_image_size_bytes must be greater than zero")
+        if self.max_buffered_bytes <= 0:
+            raise ImageStoreError("max_buffered_bytes must be greater than zero")
+        if self.max_buffered_bytes < self.max_image_size_bytes:
+            raise ImageStoreError("max_buffered_bytes must be greater than or equal to max_image_size_bytes")
         if self.session_timeout_s <= 0:
             raise ImageStoreError("session_timeout_s must be greater than zero")
         if not allowed_content_types:
@@ -96,7 +101,7 @@ class _ImageSession:
 
     meta: ImageMetaMessage
     received_at: datetime
-    part_path: Path
+    buffer: bytearray
     received_chunks: set[int] = field(default_factory=set)
     done_received: bool = False
 
@@ -104,9 +109,10 @@ class _ImageSession:
 class ImageAssembler:
     """Reconstruct JPEG images from MQTT meta/chunk/done messages.
 
-    The assembler writes chunks directly to a temporary `.part` file. When all
-    expected chunks are present and the transfer is marked done, it validates
-    the JPEG and atomically renames the file into the capture directory.
+    The assembler stores active transfers in memory to avoid chunk-by-chunk
+    writes on Raspberry Pi microSD storage. When all expected chunks are
+    present and the transfer is marked done, it validates the JPEG and writes
+    the final file to the capture directory once.
     """
 
     def __init__(self, config: ImageStoreConfig, clock: Clock | None = None) -> None:
@@ -163,8 +169,7 @@ class ImageAssembler:
         ]
 
         for key in expired_keys:
-            session = self._sessions.pop(key)
-            session.part_path.unlink(missing_ok=True)
+            self._sessions.pop(key)
 
         return len(expired_keys)
 
@@ -192,19 +197,17 @@ class ImageAssembler:
             raise ImageStoreError(
                 f"chunk_count mismatch: expected {expected_chunk_count}, got {message.chunk_count}"
             )
-
-        part_path = self._part_path(node_id=node_id, capture_id=capture_id)
-        part_path.parent.mkdir(parents=True, exist_ok=True)
-        part_path.write_bytes(b"")
+        if self._buffered_bytes() + message.total_size > self._config.max_buffered_bytes:
+            raise ImageStoreError("active image transfers exceed max_buffered_bytes")
 
         self._sessions[key] = _ImageSession(
             meta=message,
             received_at=self._clock(),
-            part_path=part_path,
+            buffer=bytearray(message.total_size),
         )
 
     def _handle_chunk(self, message: ImageChunkMessage) -> StoredFrame | None:
-        """Write one binary image chunk to its session `.part` file."""
+        """Write one binary image chunk to its in-memory session buffer."""
 
         node_id = _safe_path_segment(message.node_id, "node_id")
         capture_id = _safe_path_segment(message.capture_id, "capture_id")
@@ -225,10 +228,9 @@ class ImageAssembler:
                 f"chunk {message.index} has invalid size: expected {expected_size}, got {len(message.data)}"
             )
 
-        offset = message.index * meta.chunk_size
-        with session.part_path.open("r+b") as file:
-            file.seek(offset)
-            file.write(message.data)
+        start = message.index * meta.chunk_size
+        end = start + len(message.data)
+        session.buffer[start:end] = message.data
 
         session.received_chunks.add(message.index)
 
@@ -259,13 +261,13 @@ class ImageAssembler:
         return self._finalize_session(node_id=node_id, capture_id=capture_id, session=session)
 
     def _finalize_session(self, node_id: str, capture_id: str, session: _ImageSession) -> StoredFrame:
-        """Validate and atomically move a complete `.part` file to `.jpg`."""
+        """Validate an in-memory capture and write the final `.jpg` file."""
 
         meta = session.meta
-        actual_size = session.part_path.stat().st_size
+        actual_size = len(session.buffer)
         if actual_size != meta.total_size:
             raise ImageStoreError(f"final image size mismatch: expected {meta.total_size}, got {actual_size}")
-        if not _is_jpeg_file(session.part_path):
+        if not _is_jpeg_bytes(session.buffer):
             raise ImageStoreError("final image is not a valid JPEG file")
 
         final_path = self._final_path(node_id=node_id, capture_id=capture_id, received_at=session.received_at)
@@ -273,7 +275,7 @@ class ImageAssembler:
         if final_path.exists():
             raise ImageStoreError(f"final image already exists: {final_path}")
 
-        session.part_path.replace(final_path)
+        final_path.write_bytes(session.buffer)
         self._sessions.pop((node_id, capture_id), None)
 
         return StoredFrame(
@@ -286,11 +288,9 @@ class ImageAssembler:
         )
 
     def _discard_session(self, node_id: str, capture_id: str) -> None:
-        """Delete one incomplete session and its temporary file."""
+        """Delete one incomplete in-memory session."""
 
-        session = self._sessions.pop((node_id, capture_id), None)
-        if session is not None:
-            session.part_path.unlink(missing_ok=True)
+        self._sessions.pop((node_id, capture_id), None)
 
     def _required_session(self, node_id: str, capture_id: str) -> _ImageSession:
         """Return an active image session or raise a storage error."""
@@ -299,11 +299,6 @@ class ImageAssembler:
             return self._sessions[(node_id, capture_id)]
         except KeyError as exc:
             raise ImageStoreError(f"no image session for node={node_id} capture={capture_id}") from exc
-
-    def _part_path(self, node_id: str, capture_id: str) -> Path:
-        """Build the temporary file path for one image transfer."""
-
-        return self._config.data_dir / "tmp" / node_id / f"{capture_id}.part"
 
     def _final_path(self, node_id: str, capture_id: str, received_at: datetime) -> Path:
         """Build the final JPEG path for one completed image transfer."""
@@ -318,6 +313,11 @@ class ImageAssembler:
             / f"{received_at.day:02d}"
             / f"{timestamp}_{capture_id}.jpg"
         )
+
+    def _buffered_bytes(self) -> int:
+        """Return total bytes currently reserved by active transfer buffers."""
+
+        return sum(session.meta.total_size for session in self._sessions.values())
 
 
 def _local_now() -> datetime:
@@ -349,18 +349,10 @@ def _missing_chunks(session: _ImageSession) -> list[int]:
     return sorted(expected - session.received_chunks)
 
 
-def _is_jpeg_file(path: Path) -> bool:
-    """Check whether a file has JPEG start and end markers."""
+def _is_jpeg_bytes(data: bytes | bytearray) -> bool:
+    """Check whether bytes have JPEG start and end markers."""
 
-    if path.stat().st_size < 4:
-        return False
-
-    with path.open("rb") as file:
-        start = file.read(2)
-        file.seek(-2, os.SEEK_END)
-        end = file.read(2)
-
-    return start == _JPEG_START and end == _JPEG_END
+    return len(data) >= 4 and data.startswith(_JPEG_START) and data.endswith(_JPEG_END)
 
 
 def _format_human_timestamp(value: datetime) -> str:

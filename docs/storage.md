@@ -4,9 +4,25 @@
 
 Vision-Hub stores complete JPEG frames received from ESP32-P4 nodes over MQTT.
 
-The storage layer does not decode or transform the image. It reconstructs the original JPEG byte stream from binary chunks, validates it, and writes it to the Raspberry Pi storage path.
+The storage layer does not decode or transform the image. It reconstructs the original JPEG byte stream from binary chunks in RAM, validates it, and writes the final JPEG once to the Raspberry Pi storage path.
 
 No persistent metadata sidecar is created. The useful identity data is carried by the directory layout, the filename, and the in-memory `StoredFrame` returned to the service pipeline.
+
+Raspberry Pi deployments commonly run from microSD only: OS, Docker, code, logs, model files, and captures share the same flash storage. Vision-Hub therefore avoids chunk-by-chunk disk writes. Active transfers are buffered in memory, then only complete and valid JPEG files are persisted.
+
+## Raspberry Pi 5 microSD Constraint
+
+Raspberry Pi 5 exposes a microSD slot with SDR104 support. SDR104 is a UHS-I bus mode capped at `104 MB/s` by the SD standard; actual write speed depends on the card. Raspberry Pi's own SD card documentation lists Raspberry Pi 5 in SDR104 mode with `2,000` random 4 KB write IOPS for its official A2 cards.
+
+For Vision-Hub, the important workload is sequential JPEG writes, not continuous raw video. At `1 frame/s`, the required write bandwidth is:
+
+```text
+average_jpeg_size_bytes * node_count / second
+```
+
+Even using the current safety limit of `5 MB` per JPEG, one node at `1 frame/s` writes about `5 MB/s`; four nodes at that worst-case limit write about `20 MB/s`. That is below the SDR104 bus ceiling and within the range expected from a good U3/V30/A2 microSD card. The remaining risk is not instantaneous speed but flash wear, so storage is RAM-first, motion/event driven, and must be paired with retention cleanup.
+
+References: [Raspberry Pi 5 announcement](https://www.raspberrypi.com/news/introducing-raspberry-pi-5/), [SD Association bus speeds](https://www.sdcard.org/developers/sd-standard-overview/bus-speed-default-speed-high-speed-uhs-sd-express/), [Raspberry Pi SD card documentation](https://www.raspberrypi.com/documentation/accessories/sd-cards.html).
 
 ## Runtime Contract
 
@@ -16,13 +32,13 @@ The storage assembler is independent from the MQTT client. It receives already p
 | --- | --- |
 | Runtime | Python 3.13+ |
 | Input | MQTT image messages parsed by `vision_hub.mqtt` |
-| Temporary file | `.part`, written with Python filesystem APIs and `pathlib` |
-| Final file | `.jpg`, finalized with atomic `Path.replace()` |
+| Transfer buffer | RAM `bytearray`, one active buffer per capture |
+| Final file | `.jpg`, written after all chunks are validated |
 | Timestamp | Raspberry Pi local wall clock, millisecond precision |
 | Platform | Linux/Unix-like filesystem with POSIX-style paths and permissions |
-| Docker persistence | bind mount from host SSD path to `/var/lib/vision-hub` |
+| Docker persistence | bind mount from host storage path to `/var/lib/vision-hub` |
 
-The code is not tied to Raspberry Pi hardware. Raspberry Pi OS Lite is the deployment target because it provides the expected Linux filesystem behavior, Docker bind mounts, local clock, and SSD mount support.
+The code is not tied to Raspberry Pi hardware. Raspberry Pi OS Lite is the deployment target because it provides the expected Linux filesystem behavior, Docker bind mounts, local clock, and microSD or external storage support.
 
 ## MQTT Image Contract
 
@@ -46,6 +62,20 @@ The metadata message contains:
 
 Chunks are not JSON and are not base64 encoded. They are raw binary slices of the final JPEG file.
 
+## Memory Model
+
+Each active capture reserves one RAM buffer sized exactly from `total_size`.
+
+Default limits:
+
+| Setting | Default | Meaning |
+| --- | ---: | --- |
+| `max_image_size_bytes` | `5_000_000` | maximum size for one received image |
+| `max_buffered_bytes` | `64_000_000` | maximum RAM reserved by all active captures |
+| `session_timeout_s` | `30` | maximum age of an incomplete transfer |
+
+If a node starts a transfer that would exceed these limits, the transfer is rejected before allocating more memory.
+
 ## Storage Layout
 
 Container path:
@@ -64,15 +94,6 @@ Final captures:
         04/
           21/
             2026-04-21_14-38-12.423_cap-abc123.jpg
-```
-
-Temporary files:
-
-```text
-/var/lib/vision-hub/
-  tmp/
-    p4-001/
-      cap-abc123.part
 ```
 
 The first capture directory level is always the ESP32 `node_id`. This keeps captures from different nodes physically separated on disk.
@@ -101,17 +122,17 @@ The date is also repeated in the directory path to keep large capture sets navig
 | --- | --- |
 | 1 | receive `ImageMetaMessage` |
 | 2 | validate node id, capture id, content type, total size, chunk size, and chunk count |
-| 3 | create `tmp/{node_id}/{capture_id}.part` |
+| 3 | allocate one RAM buffer with `total_size` bytes |
 | 4 | receive `ImageChunkMessage` objects |
-| 5 | write each chunk at `chunk_index * chunk_size` |
+| 5 | write each chunk into RAM at `chunk_index * chunk_size` |
 | 6 | receive `ImageDoneMessage` |
 | 7 | verify all chunks are present |
-| 8 | verify final file size equals `total_size` |
+| 8 | verify buffer size equals `total_size` |
 | 9 | verify JPEG start and end markers |
-| 10 | atomically rename `.part` to `.jpg` |
+| 10 | write the final `.jpg` file |
 | 11 | return a `StoredFrame` object |
 
-Chunk order is not significant. The assembler writes each chunk at its expected file offset.
+Chunk order is not significant. The assembler writes each chunk into its expected RAM offset.
 
 ## Validation Rules
 
@@ -120,11 +141,12 @@ Chunk order is not significant. The assembler writes each chunk at its expected 
 | `node_id` and `capture_id` must be safe path segments | reject transfer |
 | `content_type` must be `image/jpeg` | reject transfer |
 | `total_size` must be positive and below configured maximum | reject transfer |
+| total active buffers must remain below configured maximum | reject transfer |
 | `chunk_count` must match `ceil(total_size / chunk_size)` | reject transfer |
 | chunk index must be within range | reject chunk |
 | chunk payload size must match expected size | reject chunk |
 | all chunks must be present before finalization | keep transfer incomplete and report error |
-| final file size must match `total_size` | reject finalization |
+| final buffer size must match `total_size` | reject finalization |
 | JPEG bytes must start with `FF D8` and end with `FF D9` | reject finalization |
 
 ## Python API
@@ -139,6 +161,7 @@ from vision_hub.storage import ImageStoreConfig
 config = ImageStoreConfig(
     data_dir=Path("/var/lib/vision-hub"),
     max_image_size_bytes=5_000_000,
+    max_buffered_bytes=64_000_000,
     session_timeout_s=30,
     allowed_content_types={"image/jpeg"},
 )
@@ -184,13 +207,13 @@ deploy/vision-hub-network.env
 Default:
 
 ```env
-VISION_HUB_HOST_DATA_DIR=/mnt/vision-hub-ssd/data
+VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 ```
 
 Docker Compose mounts it as:
 
 ```text
-${VISION_HUB_HOST_DATA_DIR:-/mnt/vision-hub-ssd/data}:/var/lib/vision-hub
+${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}:/var/lib/vision-hub
 ```
 
-This is a bind mount, not a Docker volume. The stored frames therefore live on a predictable host path and can be placed directly on an SSD.
+This is a bind mount, not a Docker volume. The stored frames therefore live on a predictable host path. In the default microSD-only deployment, that path is on the microSD card. If external storage is added later, only `VISION_HUB_HOST_DATA_DIR` needs to change.

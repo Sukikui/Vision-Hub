@@ -45,7 +45,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 | Docker stack | `compose.yaml` rendered and managed through `deploy/docker/` |
 | AI model | YOLO11n exported to NCNN with `tools/export_yolo_ncnn.py` |
 | Model files | `model.ncnn.param`, `model.ncnn.bin`, and `metadata.yaml` present in the model directory |
-| Capture storage | SSD or host directory mounted at `/var/lib/vision-hub` in the container |
+| Capture storage | host directory mounted at `/var/lib/vision-hub` in the container |
 | Field network | ESP32 nodes can reach the Raspberry Pi MQTT broker, typically on port `1883` |
 
 ## Getting Started
@@ -118,10 +118,10 @@ Model artifacts are not versioned in Git.
 Capture data is stored through the host path configured in [`deploy/vision-hub-network.env`](deploy/vision-hub-network.env):
 
 ```env
-VISION_HUB_HOST_DATA_DIR=/mnt/vision-hub-ssd/data
+VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 ```
 
-On the Raspberry Pi, this path should point to the SSD-backed directory used for received frames. Inside the container it is always mounted as `/var/lib/vision-hub`.
+On the Raspberry Pi, this path points to the host directory used for received frames. In a microSD-only deployment, it lives on the microSD card. If external storage is added later, this value can point to that mount instead. Inside the container it is always mounted as `/var/lib/vision-hub`.
 
 ```bash
 deploy/docker/render-configs.sh

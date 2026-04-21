@@ -232,7 +232,7 @@ class DeployConfigTest(unittest.TestCase):
             services["vision-hub"]["volumes"][1],
             {
                 "type": "bind",
-                "source": "${VISION_HUB_HOST_DATA_DIR:-/mnt/vision-hub-ssd/data}",
+                "source": "${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}",
                 "target": "/var/lib/vision-hub",
             },
         )

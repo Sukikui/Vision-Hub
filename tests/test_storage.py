@@ -18,7 +18,7 @@ COMPLETED_AT = datetime(2026, 4, 21, 14, 38, 13, 19_000, tzinfo=timezone(timedel
 
 
 class ImageAssemblerTest(unittest.TestCase):
-    """Unit tests for the filesystem-backed image assembler."""
+    """Unit tests for the RAM-backed image assembler."""
 
     def test_stores_complete_jpeg_in_node_date_directory(self) -> None:
         """Assemble a complete transfer and store it as a human-named JPEG."""
@@ -50,7 +50,7 @@ class ImageAssemblerTest(unittest.TestCase):
             self.assertEqual(stored.completed_at, COMPLETED_AT)
             self.assertEqual(stored.total_size, len(JPEG_BYTES))
             self.assertEqual(expected_path.read_bytes(), JPEG_BYTES)
-            self.assertFalse((Path(temp_dir) / "tmp" / "p4-001" / "cap-abc123.part").exists())
+            self.assertFalse((Path(temp_dir) / "tmp").exists())
 
     def test_stores_chunks_received_out_of_order(self) -> None:
         """Write chunks by index so MQTT delivery order does not matter."""
@@ -113,20 +113,6 @@ class ImageAssemblerTest(unittest.TestCase):
             with self.assertRaisesRegex(ImageStoreError, "invalid size"):
                 assembler.handle(_chunk(0, b"\xff\xd8"))
 
-    def test_rejects_final_size_mismatch(self) -> None:
-        """Validate final file size before publishing the completed frame."""
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            assembler = _assembler(root)
-            assembler.handle(_meta())
-            assembler.handle(_chunk(0, JPEG_BYTES[:4]))
-            assembler.handle(_chunk(1, JPEG_BYTES[4:]))
-            (root / "tmp" / "p4-001" / "cap-abc123.part").write_bytes(JPEG_BYTES + b"x")
-
-            with self.assertRaisesRegex(ImageStoreError, "final image size mismatch"):
-                assembler.handle(_done())
-
     def test_rejects_invalid_jpeg_signature(self) -> None:
         """Reject complete transfers that are not JPEG files."""
 
@@ -150,7 +136,7 @@ class ImageAssemblerTest(unittest.TestCase):
                 assembler.handle(_meta(content_type="image/png"))
 
     def test_rejects_images_larger_than_configured_limit(self) -> None:
-        """Prevent unexpectedly large captures from consuming the SSD."""
+        """Prevent unexpectedly large captures from consuming memory."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
             config = ImageStoreConfig(data_dir=Path(temp_dir), max_image_size_bytes=4)
@@ -158,6 +144,17 @@ class ImageAssemblerTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ImageStoreError, "exceeds max_image_size_bytes"):
                 assembler.handle(_meta())
+
+    def test_rejects_total_active_buffers_above_configured_limit(self) -> None:
+        """Prevent active transfer buffers from consuming too much RAM."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = ImageStoreConfig(data_dir=Path(temp_dir), max_image_size_bytes=8, max_buffered_bytes=12)
+            assembler = ImageAssembler(config=config, clock=_clock())
+
+            assembler.handle(_meta())
+            with self.assertRaisesRegex(ImageStoreError, "exceed max_buffered_bytes"):
+                assembler.handle(_meta(capture_id="cap-def456"))
 
     def test_rejects_unsafe_path_segments(self) -> None:
         """Prevent node and capture ids from escaping the storage root."""
@@ -178,8 +175,8 @@ class ImageAssemblerTest(unittest.TestCase):
 
             self.assertIsNone(result)
 
-    def test_cleanup_expired_removes_stale_part_files(self) -> None:
-        """Delete incomplete sessions after their configured timeout."""
+    def test_cleanup_expired_removes_stale_memory_buffers(self) -> None:
+        """Delete incomplete in-memory sessions after their timeout."""
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -189,7 +186,7 @@ class ImageAssemblerTest(unittest.TestCase):
             removed = assembler.cleanup_expired(now=RECEIVED_AT + timedelta(seconds=31))
 
             self.assertEqual(removed, 1)
-            self.assertFalse((root / "tmp" / "p4-001" / "cap-abc123.part").exists())
+            self.assertFalse((root / "tmp").exists())
 
 
 def _assembler(data_dir: Path) -> ImageAssembler:
