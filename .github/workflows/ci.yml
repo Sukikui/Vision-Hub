@@ -57,12 +57,13 @@ jobs:
         run: uv sync --locked
 
       - name: 🔎 Compile Vision-Hub Python files
-        run: uv run python -m compileall main.py vision_hub tools tests/test_export_yolo_ncnn.py tests/test_mqtt_messages.py tests/test_mqtt_topics.py tests/test_ncnn_yolo.py tests/test_storage.py tests/test_storage_retention.py
+        run: uv run python -m compileall main.py vision_hub tools tests/test_export_yolo_ncnn.py tests/test_homeassistant_discovery.py tests/test_mqtt_messages.py tests/test_mqtt_topics.py tests/test_ncnn_yolo.py tests/test_storage.py tests/test_storage_retention.py
 
       - name: 🧪 Run Vision-Hub unit tests
         run: |
           uv run python -m unittest -v \
             tests.test_export_yolo_ncnn \
+            tests.test_homeassistant_discovery \
             tests.test_mqtt_messages \
             tests.test_mqtt_topics \
             tests.test_ncnn_yolo \

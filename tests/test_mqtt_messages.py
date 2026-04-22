@@ -10,7 +10,6 @@ from vision_hub.mqtt.messages import (
     NodeReplyMessage,
     NodeRuntimeConfigPatch,
     PayloadError,
-    build_broadcast_config_command,
     build_capture_command,
     build_config_command,
     parse_incoming_message,
@@ -122,16 +121,6 @@ class MqttMessageTest(unittest.TestCase):
 
         with self.assertRaises(PayloadError):
             build_config_command("p4-001", "req-43", patch)
-
-    def test_build_broadcast_config_command(self) -> None:
-        """Build broadcast runtime configuration commands."""
-
-        patch = NodeRuntimeConfigPatch(motion_detection_enabled=True)
-
-        command = build_broadcast_config_command("req-99", patch)
-
-        self.assertEqual(command.topic, "vision/broadcast/cmd/config")
-        self.assertEqual(json.loads(command.payload), {"request_id": "req-99", "motion_detection_enabled": True})
 
 
 if __name__ == "__main__":

@@ -41,9 +41,11 @@ There is no separate `dnsmasq.service` or `mosquitto.service` in the Docker depl
 | --- | --- |
 | `deploy/vision-hub-network.env` | source of truth for network values, host capture-storage path, and Home Assistant config path |
 | `deploy/rpi/configure-network-interfaces.sh` | creates or updates the Raspberry Pi Ethernet and Wi-Fi AP profiles |
-| `deploy/docker/render-configs.sh` | renders Docker-mounted dnsmasq and Mosquitto configs |
+| `deploy/docker/render-configs.sh` | renders Docker-mounted dnsmasq, Mosquitto, and Home Assistant dashboard configs |
 | `deploy/docker/install-rpi.sh` | installs and enables the `vision-hub-stack.service` systemd unit |
 | `compose.yaml` | defines the `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, `vision-hub`, and `homeassistant` containers |
+| `deploy/homeassistant/configuration.yaml` | versioned Home Assistant appliance configuration |
+| `tools/render_homeassistant_dashboard.py` | generates the Vision-Hub Lovelace dashboard from configured node ids |
 
 The old non-Docker split is intentionally gone. dnsmasq and Mosquitto are not installed as independent host services; Compose starts them from `compose.yaml`.
 
@@ -98,12 +100,27 @@ http://192.168.50.1:8123
 
 Home Assistant configuration is stored on the host path configured by `HOME_ASSISTANT_CONFIG_DIR`.
 
+The Vision-Hub dashboard is generated from `VISION_HUB_NODE_IDS` in `deploy/vision-hub-network.env`. The generated dashboard is mounted read-only at:
+
+```text
+/config/dashboards/vision-hub.yaml
+```
+
+Captured images are mounted read-only into Home Assistant at:
+
+```text
+/media/vision-hub-captures
+```
+
+The archive is browsed through `Media -> captures`.
+
 ## Docs
 
 | Document | Content |
 | --- | --- |
 | [Network](network.md) | field LAN contract, DHCP gateway, Raspberry Pi interface |
 | [Docker](docker.md) | Compose stack, containers, volumes, systemd boot service |
+| [Home Assistant](home-assistant.md) | MQTT entities, dashboard layout, commands, capture archive |
 | [Storage](storage.md) | MQTT image reconstruction and microSD-aware capture storage |
 | [Inference](inference.md) | NCNN YOLO model, export, and runtime loading |
 

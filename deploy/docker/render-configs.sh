@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 DEPLOY_DIR="$(dirname "${SCRIPT_DIR}")"
+PROJECT_DIR="$(dirname "${DEPLOY_DIR}")"
 DEFAULT_ENV_FILE="${DEPLOY_DIR}/vision-hub-network.env"
 ENV_FILE="${ENV_FILE:-${DEFAULT_ENV_FILE}}"
 GENERATED_DIR="${GENERATED_DIR:-${SCRIPT_DIR}/generated}"
@@ -12,6 +13,7 @@ MOSQUITTO_TEMPLATE="${SCRIPT_DIR}/templates/mosquitto.conf.template"
 FIELD_DNSMASQ_TARGET="${GENERATED_DIR}/dnsmasq-field/vision-hub.conf"
 ADMIN_DNSMASQ_TARGET="${GENERATED_DIR}/dnsmasq-admin/vision-hub.conf"
 MOSQUITTO_TARGET="${GENERATED_DIR}/mosquitto/vision-hub.conf"
+HOME_ASSISTANT_DASHBOARD_TARGET="${GENERATED_DIR}/homeassistant/dashboards/vision-hub.yaml"
 
 # This script does not install anything. It turns the shared network env file
 # into concrete config files mounted by Docker Compose.
@@ -84,6 +86,15 @@ render_mosquitto_config() {
         "${MOSQUITTO_TEMPLATE}"
 }
 
+render_homeassistant_dashboard() {
+    # Render the versioned Home Assistant dashboard from the configured node
+    # list. Discovery still creates entities dynamically; this generated YAML
+    # only controls the Lovelace card layout.
+    python3 "${PROJECT_DIR}/tools/render_homeassistant_dashboard.py" \
+        --node-ids "${VISION_HUB_NODE_IDS}" \
+        --output "${HOME_ASSISTANT_DASHBOARD_TARGET}"
+}
+
 validate_no_placeholders() {
     # Failing here catches missing env values or stale template placeholders
     # before Docker starts containers with invalid service configs.
@@ -123,6 +134,7 @@ ADMIN_DHCP_LEASE_TIME="${ADMIN_DHCP_LEASE_TIME:?ADMIN_DHCP_LEASE_TIME is require
 ADMIN_DNS_NAME="${ADMIN_DNS_NAME:?ADMIN_DNS_NAME is required}"
 MQTT_LISTENER_ADDRESS="${MQTT_LISTENER_ADDRESS:?MQTT_LISTENER_ADDRESS is required}"
 MQTT_PORT="${MQTT_PORT:?MQTT_PORT is required}"
+VISION_HUB_NODE_IDS="${VISION_HUB_NODE_IDS:-}"
 
 # Docker Mosquitto stores persistence in its container data directory and logs
 # to stdout so Docker can collect service logs.
@@ -157,18 +169,22 @@ fi
 mkdir -p \
     "$(dirname "${FIELD_DNSMASQ_TARGET}")" \
     "$(dirname "${ADMIN_DNSMASQ_TARGET}")" \
-    "$(dirname "${MOSQUITTO_TARGET}")"
+    "$(dirname "${MOSQUITTO_TARGET}")" \
+    "$(dirname "${HOME_ASSISTANT_DASHBOARD_TARGET}")"
 
 render_field_dnsmasq_config > "${FIELD_DNSMASQ_TARGET}"
 render_admin_dnsmasq_config > "${ADMIN_DNSMASQ_TARGET}"
 render_mosquitto_config > "${MOSQUITTO_TARGET}"
+render_homeassistant_dashboard
 
 # Step 5: validate the rendered files before reporting success.
 validate_no_placeholders "${FIELD_DNSMASQ_TARGET}"
 validate_no_placeholders "${ADMIN_DNSMASQ_TARGET}"
 validate_no_placeholders "${MOSQUITTO_TARGET}"
+validate_no_placeholders "${HOME_ASSISTANT_DASHBOARD_TARGET}"
 
 echo "Rendered Docker configs:"
 echo "- ${FIELD_DNSMASQ_TARGET}"
 echo "- ${ADMIN_DNSMASQ_TARGET}"
 echo "- ${MOSQUITTO_TARGET}"
+echo "- ${HOME_ASSISTANT_DASHBOARD_TARGET}"

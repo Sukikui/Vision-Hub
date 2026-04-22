@@ -18,10 +18,6 @@ from vision_hub.mqtt.messages import (
     build_config_command,
     build_ping_command,
     build_reboot_command,
-    build_broadcast_capture_command,
-    build_broadcast_config_command,
-    build_broadcast_ping_command,
-    build_broadcast_reboot_command,
     parse_incoming_message,
 )
 from vision_hub.mqtt.topics import DEFAULT_SUBSCRIPTIONS
@@ -60,7 +56,7 @@ class MqttClient:
 
     The client subscribes to all firmware topics defined by the MQTT contract,
     parses incoming messages into typed objects, and publishes command payloads
-    back to individual nodes or the broadcast command topic.
+    back to individual nodes.
     """
 
     def __init__(
@@ -184,55 +180,6 @@ class MqttClient:
         """
 
         return self.publish_command(build_config_command(node_id, request_id, patch))
-
-    def broadcast_ping(self, request_id: str) -> mqtt.MQTTMessageInfo:
-        """Broadcast a ping command to all nodes.
-
-        Args:
-            request_id: Request id used to correlate replies.
-
-        Returns:
-            Paho publish tracking object.
-        """
-
-        return self.publish_command(build_broadcast_ping_command(request_id))
-
-    def broadcast_capture(self, request_id: str) -> mqtt.MQTTMessageInfo:
-        """Broadcast a capture command to all nodes.
-
-        Args:
-            request_id: Request id used to correlate replies.
-
-        Returns:
-            Paho publish tracking object.
-        """
-
-        return self.publish_command(build_broadcast_capture_command(request_id))
-
-    def broadcast_reboot(self, request_id: str) -> mqtt.MQTTMessageInfo:
-        """Broadcast a reboot command to all nodes.
-
-        Args:
-            request_id: Request id used to correlate replies.
-
-        Returns:
-            Paho publish tracking object.
-        """
-
-        return self.publish_command(build_broadcast_reboot_command(request_id))
-
-    def broadcast_config(self, request_id: str, patch: NodeRuntimeConfigPatch) -> mqtt.MQTTMessageInfo:
-        """Broadcast a runtime configuration patch to all nodes.
-
-        Args:
-            request_id: Request id used to correlate replies.
-            patch: Runtime configuration values to update.
-
-        Returns:
-            Paho publish tracking object.
-        """
-
-        return self.publish_command(build_broadcast_config_command(request_id, patch))
 
     def _handle_connect(self, client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, properties: Any) -> None:
         """Subscribe to ESP32 topics after a successful broker connection.

@@ -1,0 +1,14 @@
+default_config:
+
+homeassistant:
+  media_dirs:
+    captures: /media/vision-hub-captures
+
+lovelace:
+  dashboards:
+    vision-hub:
+      mode: yaml
+      filename: dashboards/vision-hub.yaml
+      title: Vision-Hub
+      icon: mdi:cctv
+      show_in_sidebar: true

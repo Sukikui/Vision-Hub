@@ -65,6 +65,12 @@ services:
       - type: bind
         source: ${HOME_ASSISTANT_CONFIG_DIR:-/var/lib/vision-hub-homeassistant}
         target: /config
+      - ./deploy/homeassistant/configuration.yaml:/config/configuration.yaml:ro
+      - ./deploy/docker/generated/homeassistant/dashboards/vision-hub.yaml:/config/dashboards/vision-hub.yaml:ro
+      - type: bind
+        source: ${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}/captures
+        target: /media/vision-hub-captures
+        read_only: true
       - /etc/localtime:/etc/localtime:ro
       - /run/dbus:/run/dbus:ro
     restart: unless-stopped

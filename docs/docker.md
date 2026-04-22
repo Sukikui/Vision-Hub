@@ -117,6 +117,7 @@ Template sources:
 | `deploy/docker/templates/dnsmasq-field.conf.template` | `deploy/docker/generated/dnsmasq-field/vision-hub.conf` |
 | `deploy/docker/templates/dnsmasq-admin.conf.template` | `deploy/docker/generated/dnsmasq-admin/vision-hub.conf` |
 | `deploy/docker/templates/mosquitto.conf.template` | `deploy/docker/generated/mosquitto/vision-hub.conf` |
+| `tools/render_homeassistant_dashboard.py` | `deploy/docker/generated/homeassistant/dashboards/vision-hub.yaml` |
 | `deploy/docker/templates/vision-hub-stack.service.template` | `/etc/systemd/system/vision-hub-stack.service` |
 
 Generated repository files and mount targets:
@@ -126,6 +127,7 @@ Generated repository files and mount targets:
 | `deploy/docker/generated/dnsmasq-field/vision-hub.conf` | `/etc/dnsmasq.d/vision-hub.conf` | read-only | `dnsmasq-field` |
 | `deploy/docker/generated/dnsmasq-admin/vision-hub.conf` | `/etc/dnsmasq.d/vision-hub.conf` | read-only | `dnsmasq-admin` |
 | `deploy/docker/generated/mosquitto/vision-hub.conf` | `/mosquitto/config/vision-hub.conf` | read-only | `mosquitto` |
+| `deploy/docker/generated/homeassistant/dashboards/vision-hub.yaml` | `/config/dashboards/vision-hub.yaml` | read-only | `homeassistant` |
 
 The generated directory is ignored by Git because it contains derived local files. It can be deleted and recreated at any time:
 
@@ -133,7 +135,7 @@ The generated directory is ignored by Git because it contains derived local file
 deploy/docker/render-configs.sh
 ```
 
-Docker Compose needs those generated files to exist before starting `dnsmasq-field`, `dnsmasq-admin`, and `mosquitto`, because they are mounted into the containers.
+Docker Compose needs those generated files to exist before starting `dnsmasq-field`, `dnsmasq-admin`, `mosquitto`, and `homeassistant`, because they are mounted into the containers.
 
 ## Volumes
 
@@ -144,6 +146,9 @@ Docker Compose needs those generated files to exist before starting `dnsmasq-fie
 | `mosquitto-log` | `/mosquitto/log` | read-write | Mosquitto log directory |
 | `${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}` | `/var/lib/vision-hub` | read-write | Vision-Hub capture storage |
 | `${HOME_ASSISTANT_CONFIG_DIR:-/var/lib/vision-hub-homeassistant}` | `/config` | read-write | Home Assistant configuration and database |
+| `deploy/homeassistant/configuration.yaml` | `/config/configuration.yaml` | read-only | Home Assistant appliance configuration |
+| `deploy/docker/generated/homeassistant/dashboards/vision-hub.yaml` | `/config/dashboards/vision-hub.yaml` | read-only | Vision-Hub dashboard |
+| `${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}/captures` | `/media/vision-hub-captures` | read-only | Home Assistant Media Browser archive |
 | `/etc/localtime` | `/etc/localtime` | read-only | host timezone file |
 | `/run/dbus` | `/run/dbus` | read-only | optional host D-Bus access for Home Assistant integrations |
 
@@ -156,6 +161,7 @@ VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 HOME_ASSISTANT_CONFIG_DIR=/var/lib/vision-hub-homeassistant
 HOME_ASSISTANT_TZ=Europe/Paris
 ADMIN_DNS_NAME=vision-hub.lan
+VISION_HUB_NODE_IDS=p4-001
 ```
 
 `vision-hub` receives these runtime environment variables:
@@ -172,6 +178,8 @@ ADMIN_DNS_NAME=vision-hub.lan
 | Variable | Value |
 | --- | --- |
 | `TZ` | `${HOME_ASSISTANT_TZ:-Europe/Paris}` |
+
+The Home Assistant dashboard cards are generated from `VISION_HUB_NODE_IDS`. MQTT Discovery still creates entities dynamically; the generated dashboard controls only the Lovelace card layout.
 
 ## Home Assistant Access
 
@@ -191,7 +199,15 @@ From the ESP32 field LAN, if an operator is physically connected to that network
 http://192.168.50.1:8123
 ```
 
-The first visit starts Home Assistant onboarding. Vision-Hub later publishes clean MQTT entities to the local Mosquitto broker so Home Assistant can display node status, detections, and system health without seeing ESP32 image chunks.
+The first visit starts Home Assistant onboarding. Vision-Hub publishes clean MQTT entities to the local Mosquitto broker so Home Assistant can display node status, detections, latest validated captures, and system health without seeing ESP32 image chunks.
+
+The MQTT entity contract is documented in [Home Assistant](home-assistant.md).
+
+Archived JPEG captures are browsable from Home Assistant through:
+
+```text
+Media -> captures
+```
 
 ## Boot Service
 

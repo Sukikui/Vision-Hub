@@ -55,7 +55,6 @@ NODE_STATUS_ONLINE = "vision/nodes/{node_id}/status/online"
 NODE_STATUS_HEARTBEAT = "vision/nodes/{node_id}/status/heartbeat"
 NODE_EVENT = "vision/nodes/{node_id}/event"
 NODE_COMMAND = "vision/nodes/{node_id}/cmd/{command}"
-BROADCAST_COMMAND = "vision/broadcast/cmd/{command}"
 NODE_REPLY = "vision/nodes/{node_id}/reply/{request_id}"
 IMAGE_META = "vision/nodes/{node_id}/image/{capture_id}/meta"
 IMAGE_CHUNK = "vision/nodes/{node_id}/image/{capture_id}/chunk/{index}"
@@ -134,22 +133,6 @@ def build_node_command_topic(node_id: str, command: CommandName | str) -> str:
     node = _safe_segment(node_id, "node_id")
     command_name = _command_value(command)
     return NODE_COMMAND.format(node_id=node, command=command_name)
-
-
-def build_broadcast_command_topic(command: CommandName | str) -> str:
-    """Build a broadcast command topic.
-
-    Args:
-        command: Command name to broadcast.
-
-    Returns:
-        MQTT topic for the broadcast command.
-
-    Raises:
-        TopicError: If `command` is not supported.
-    """
-
-    return BROADCAST_COMMAND.format(command=_command_value(command))
 
 
 def validate_topic_segment(value: str, name: str) -> str:

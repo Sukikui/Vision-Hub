@@ -16,6 +16,7 @@ Important: for ESP32 firmware context, see <https://github.com/Sukikui/ESP32-Vis
 - [Deployment](docs/deployment.md)
 - [Network](docs/network.md)
 - [Docker](docs/docker.md)
+- [Home Assistant](docs/home-assistant.md)
 - [Storage](docs/storage.md)
 - [Inference](docs/inference.md)
 
@@ -124,9 +125,12 @@ VISION_HUB_HOST_DATA_DIR=/var/lib/vision-hub-data
 HOME_ASSISTANT_CONFIG_DIR=/var/lib/vision-hub-homeassistant
 HOME_ASSISTANT_TZ=Europe/Paris
 ADMIN_DNS_NAME=vision-hub.lan
+VISION_HUB_NODE_IDS=p4-001
 ```
 
 On the Raspberry Pi, this path points to the host directory used for received frames. In a microSD-only deployment, it lives on the microSD card. If external storage is added later, this value can point to that mount instead. Inside the container it is always mounted as `/var/lib/vision-hub`.
+
+`VISION_HUB_NODE_IDS` controls which ESP32 cards are generated in the Home Assistant dashboard. MQTT Discovery still creates entities dynamically; this value only controls the dashboard layout.
 
 ```bash
 deploy/docker/render-configs.sh
@@ -142,6 +146,8 @@ http://vision-hub.lan:8123
 ```
 
 The `:8123` port is required because Home Assistant does not listen on port `80`.
+
+Captured images are browsable in Home Assistant through `Media -> captures`.
 
 ## Development
 

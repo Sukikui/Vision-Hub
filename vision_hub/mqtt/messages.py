@@ -11,7 +11,6 @@ from vision_hub.mqtt.topics import (
     CommandName,
     IncomingTopicKind,
     TopicError,
-    build_broadcast_command_topic,
     build_node_command_topic,
     parse_incoming_topic,
     validate_topic_segment,
@@ -393,67 +392,6 @@ def build_config_command(node_id: str, request_id: str, patch: NodeRuntimeConfig
     )
 
 
-def build_broadcast_ping_command(request_id: str) -> OutgoingCommand:
-    """Build a broadcast ping command.
-
-    Args:
-        request_id: Request id used to correlate node replies.
-
-    Returns:
-        MQTT command object ready to publish.
-    """
-
-    return _build_broadcast_request_command(CommandName.PING, request_id)
-
-
-def build_broadcast_capture_command(request_id: str) -> OutgoingCommand:
-    """Build a broadcast capture command.
-
-    Args:
-        request_id: Request id used to correlate node replies.
-
-    Returns:
-        MQTT command object ready to publish.
-    """
-
-    return _build_broadcast_request_command(CommandName.CAPTURE, request_id)
-
-
-def build_broadcast_reboot_command(request_id: str) -> OutgoingCommand:
-    """Build a broadcast reboot command.
-
-    Args:
-        request_id: Request id used to correlate node replies.
-
-    Returns:
-        MQTT command object ready to publish.
-    """
-
-    return _build_broadcast_request_command(CommandName.REBOOT, request_id)
-
-
-def build_broadcast_config_command(request_id: str, patch: NodeRuntimeConfigPatch) -> OutgoingCommand:
-    """Build a broadcast runtime configuration command.
-
-    Args:
-        request_id: Request id used to correlate node replies.
-        patch: Runtime configuration values to update.
-
-    Returns:
-        MQTT command object ready to publish.
-
-    Raises:
-        PayloadError: If the patch or request id is invalid.
-    """
-
-    payload = patch.to_payload()
-    payload["request_id"] = _required_topic_id(request_id, "request_id")
-    return OutgoingCommand(
-        topic=build_broadcast_command_topic(CommandName.CONFIG),
-        payload=_encode_json(payload),
-    )
-
-
 def _build_node_request_command(node_id: str, command: CommandName, request_id: str) -> OutgoingCommand:
     """Build a targeted request-style command payload.
 
@@ -467,20 +405,6 @@ def _build_node_request_command(node_id: str, command: CommandName, request_id: 
     """
 
     return _build_request_command(build_node_command_topic(node_id, command), request_id)
-
-
-def _build_broadcast_request_command(command: CommandName, request_id: str) -> OutgoingCommand:
-    """Build a broadcast request-style command payload.
-
-    Args:
-        command: Command enum to publish.
-        request_id: Request id used to correlate replies.
-
-    Returns:
-        MQTT command object ready to publish.
-    """
-
-    return _build_request_command(build_broadcast_command_topic(command), request_id)
 
 
 def _build_request_command(topic: str, request_id: str) -> OutgoingCommand:

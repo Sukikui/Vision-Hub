@@ -66,6 +66,7 @@ class DeployConfigTest(unittest.TestCase):
                         "ADMIN_DNS_NAME=hub.test",
                         "MQTT_LISTENER_ADDRESS=192.168.60.1",
                         "MQTT_PORT=1884",
+                        "VISION_HUB_NODE_IDS=p4-999",
                     )
                 ),
                 encoding="utf-8",
@@ -83,6 +84,9 @@ class DeployConfigTest(unittest.TestCase):
                 encoding="utf-8"
             )
             mosquitto_config = (generated_dir / "mosquitto" / "vision-hub.conf").read_text(encoding="utf-8")
+            homeassistant_dashboard = (generated_dir / "homeassistant" / "dashboards" / "vision-hub.yaml").read_text(
+                encoding="utf-8"
+            )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("interface=enp1s0", field_dnsmasq_config)
@@ -96,6 +100,7 @@ class DeployConfigTest(unittest.TestCase):
         self.assertIn("dhcp-option=option:dns-server,192.168.70.1", admin_dnsmasq_config)
         self.assertNotIn("dhcp-option=option:router", admin_dnsmasq_config)
         self.assertIn("listener 1884 192.168.60.1", mosquitto_config)
+        self.assertIn("image.p4_999_latest_capture", homeassistant_dashboard)
 
     def test_docker_render_rejects_gateway_that_does_not_match_field_address(self) -> None:
         """Reject env files that break the ESP32 gateway-as-broker contract."""
@@ -187,6 +192,9 @@ class DeployConfigTest(unittest.TestCase):
                 encoding="utf-8"
             )
             mosquitto_config = (generated_dir / "mosquitto" / "vision-hub.conf").read_text(encoding="utf-8")
+            homeassistant_dashboard = (generated_dir / "homeassistant" / "dashboards" / "vision-hub.yaml").read_text(
+                encoding="utf-8"
+            )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("interface=eth0", field_dnsmasq_config)
@@ -202,9 +210,12 @@ class DeployConfigTest(unittest.TestCase):
         self.assertIn("listener 1883 0.0.0.0", mosquitto_config)
         self.assertIn("persistence_location /mosquitto/data/", mosquitto_config)
         self.assertIn("log_dest stdout", mosquitto_config)
+        self.assertIn("image.p4_001_latest_capture", homeassistant_dashboard)
+        self.assertIn("Media > captures", homeassistant_dashboard)
         self.assertNotIn("<", field_dnsmasq_config)
         self.assertNotIn("<", admin_dnsmasq_config)
         self.assertNotIn("<", mosquitto_config)
+        self.assertNotIn("<", homeassistant_dashboard)
 
     def test_docker_systemd_render_points_to_compose_stack(self) -> None:
         """Render the systemd unit for the repository Docker Compose stack."""
@@ -257,6 +268,20 @@ class DeployConfigTest(unittest.TestCase):
                 "target": "/config",
             },
         )
+        self.assertIn("./deploy/homeassistant/configuration.yaml:/config/configuration.yaml:ro", services["homeassistant"]["volumes"])
+        self.assertIn(
+            "./deploy/docker/generated/homeassistant/dashboards/vision-hub.yaml:/config/dashboards/vision-hub.yaml:ro",
+            services["homeassistant"]["volumes"],
+        )
+        self.assertEqual(
+            services["homeassistant"]["volumes"][3],
+            {
+                "type": "bind",
+                "source": "${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}/captures",
+                "target": "/media/vision-hub-captures",
+                "read_only": True,
+            },
+        )
         self.assertIn("/etc/localtime:/etc/localtime:ro", services["homeassistant"]["volumes"])
         self.assertIn("/run/dbus:/run/dbus:ro", services["homeassistant"]["volumes"])
         self.assertIn("mosquitto-data", compose["volumes"])
@@ -279,6 +304,9 @@ class DeployConfigTest(unittest.TestCase):
         )
         if version.returncode != 0:
             self.skipTest("docker compose plugin is not available")
+
+        render = _run_script(DOCKER_RENDER_SCRIPT)
+        self.assertEqual(render.returncode, 0, render.stderr)
 
         result = subprocess.run(
             [docker, "compose", "-f", str(COMPOSE_FILE), "config"],

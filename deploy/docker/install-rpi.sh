@@ -118,7 +118,9 @@ fi
 VISION_HUB_HOST_DATA_DIR="${VISION_HUB_HOST_DATA_DIR:-/var/lib/vision-hub-data}"
 HOME_ASSISTANT_CONFIG_DIR="${HOME_ASSISTANT_CONFIG_DIR:-/var/lib/vision-hub-homeassistant}"
 install -d -m 0755 "${VISION_HUB_HOST_DATA_DIR}"
+install -d -m 0755 "${VISION_HUB_HOST_DATA_DIR}/captures"
 install -d -m 0755 "${HOME_ASSISTANT_CONFIG_DIR}"
+install -d -m 0755 "${HOME_ASSISTANT_CONFIG_DIR}/dashboards"
 
 # Step 6: render Docker-mounted service configs before enabling the stack.
 #
